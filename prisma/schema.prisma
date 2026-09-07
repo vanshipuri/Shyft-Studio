@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  SALES
+  PRODUCTION
+}
+
+enum JobStage {
+  ENQUIRY
+  QUOTED
+  DESIGN
+  PRINTING
+  READY
+  DELIVERED
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  role      Role
+  password  String // simple hash for demo
+  createdAt DateTime @default(now())
+
+  assignedJobs Job[] @relation("JobAssigned")
+  notes        Note[]
+  activities   Activity[]
+}
+
+model Customer {
+  id        Int      @id @default(autoincrement())
+  name      String
+  company   String?
+  phone     String?
+  email     String?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  jobs     Job[]
+  notes    Note[]
+  activities Activity[]
+}
+
+model Job {
+  id            Int      @id @default(autoincrement())
+  title         String
+  description   String?
+  stage         JobStage @default(ENQUIRY)
+  assignedToId  Int?
+  assignedTo    User?    @relation("JobAssigned", fields: [assignedToId], references: [id])
+  customerId    Int
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  quoteAmount   Float?
+  dueDate       DateTime?
+  paidUpfront   Boolean  @default(false)
+  priority      String   @default("normal") // low, normal, high, urgent
+  notes         String?
+  isLate        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  activities Activity[]
+  notes      Note[]
+}
+
+model Note {
+  id        Int      @id @default(autoincrement())
+  content   String
+  createdBy Int
+  author    User     @relation(fields: [createdBy], references: [id])
+  customerId Int?
+  jobId     Int?
+  createdAt DateTime @default(now())
+}
+
+model Activity {
+  id        Int      @id @default(autoincrement())
+  description String
+  byUserId  Int
+  user      User     @relation(fields: [byUserId], references: [id])
+  jobId     Int?
+  customerId Int?
+  createdAt DateTime @default(now())
+}
