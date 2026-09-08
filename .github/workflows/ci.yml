@@ -38,19 +38,23 @@ jobs:
       - name: Intake-parser evaluation (regression gate)
         run: npm run eval
 
-      - name: Start production server
+      # Server start and smoke tests share one step: a process backgrounded in
+      # an earlier step is not guaranteed to survive into the next one.
+      - name: Deploy / proxy smoke tests (live server)
         run: |
-          npm start &
+          npm start > /tmp/server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
             if curl -fsS -o /dev/null http://127.0.0.1:3000/login; then
-              echo "server up after ${i}s"; exit 0
+              echo "server up after ${i}s"; break
             fi
             sleep 1
           done
-          echo "server failed to start" >&2; exit 1
-
-      - name: Deploy / proxy smoke tests
-        run: TEST_BASE_URL=http://127.0.0.1:3000 npm run test:deploy
+          if ! curl -fsS -o /dev/null http://127.0.0.1:3000/login; then
+            echo "server failed to start:" >&2; cat /tmp/server.log >&2; exit 1
+          fi
+          TEST_BASE_URL=http://127.0.0.1:3000 npm run test:deploy
 
       - name: No known vulnerabilities
         run: npm audit --audit-level=high
