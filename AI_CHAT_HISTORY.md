@@ -1,94 +1,141 @@
-# AI Chat History & Engineering Process — Shyft Studio Assignment
+# AI Collaboration Log & Engineering Process — Shyft Studio
 
-**Session:** Arena Agent Mode (`arena/01a07f75-shyft-studio`)  
-**Role:** AI Engineer Intern Submission  
-**Candidate:** Vanshi  
-**Date:** 8 Sep 2026  
+**Session:** Arena.ai Agent Mode · **Branch:** `arena/01a080c2-shyft-studio`
+**Role:** AI Engineer Intern submission · **Candidate:** Vanshi · **Date:** 8 Sep 2026
 
----
-
-## 1. Problem Framing & Core Insight
-
-**User Observation / Problem Statement:**  
-*"I have noticed the pipeline task and operations are seen same by all team members, how could we take this to the next level and add innovative features to impress recruiters?"*
-
-**Domain Analysis & Persona Mapping:**  
-In a 3-person commercial printing operation:
-1. **Samyak (Owner):** Needs revenue visibility, bottleneck identification, customer lifetime value (LTV), and delay risk warnings without interrupting Abhishek.
-2. **Abhishek (Sales):** Drowning in unstructured WhatsApp messages, vague inquiries, and repeating past orders manually. Needs fast lead ingestion and instant quotes.
-3. **Siddhant (Production):** Manages press queues, paper stock availability, digital proof sign-offs, and machine finishing (lamination, foil dies, cutting). Needs pre-flight checklists and late-delivery alerts.
-
-**Engineering Direction:**
-- Transform the generic single-view board into a **Multi-Persona Intelligent Command Center**.
-- Build domain-specific AI automation tools that solve the exact friction points highlighted in the brief.
+This log is the organized version of the Arena session transcript required by the
+submission. It is grouped by day/feature, and it deliberately includes the moments where
+the AI suggested something and the **candidate rejected or changed it** — the brief asks
+explicitly for evidence of that.
 
 ---
 
-## 2. Architectural Decisions & Innovations Built
+## Day 1 — Problem framing, data model, foundation
 
-### A. Messy WhatsApp Lead Ingestion Engine (`/api/ai/parse-lead`)
-- **Challenge:** Commercial print inquiries arrive as unstructured text (mixed Hindi/English, voice note transcripts, rough emails).
-- **Solution:** Built a domain-specific NLP parsing engine that:
-  - Extracts customer names, companies, phone numbers, and print line items (visiting cards, brochures, posters).
-  - Determines paper weights (300gsm, 350gsm, 400gsm) and finishes (matte, gloss, velvet, foil stamping).
-  - Computes standard price estimates (₹) and target turnaround deadlines.
-  - Identifies missing specifications and drafts a 1-click WhatsApp clarification message.
-  - Direct 1-click ingestion into the SQLite pipeline.
+### 1.1 Initial AI suggestion — "make it a generic Kanban CRM with tags"
+The assistant first proposed a standard board: *statuses `todo / doing / done`, free-text
+assignee, labels, and a dashboard with cards.* 
 
-### B. "Same as Last Time" 1-Click Repeat Order Assistant (`/api/ai/repeat-order`)
-- **Challenge:** Regular clients like BrightTech Solutions expect the team to remember past specs.
-- **Solution:** Designed an automated lookup and comparison engine that fetches historical delivered jobs, matches past specs, retains pricing, and creates a pre-populated quote in seconds.
+**What was rejected & why:** a generic board does not model a print shop. It has no notion
+of *who owns the next step*, no *quote → proof → print → finishing* reality, and no way to
+answer "is this late?" from the data alone. We rejected the generic status model and
+instead committed to:
+- a **domain pipeline** (Enquiry → Quoted → Design → Printing → Ready → Delivered), and
+- **ownership as a derived, first-class column**, not free text.
 
-### C. Operational Bottleneck Radar & Risk Predictor (`/api/ai/risk-analysis`)
-- **Challenge:** Late jobs (like Singh & Sons Job #7) damage client trust if not caught early.
-- **Solution:** Built a continuous health evaluator that detects machine load, paper stock dependencies, and SLA countdowns, assigning risk tiers (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`) with actionable floor solutions.
+### 1.2 AI suggestion — "use Postgres + Prisma + full auth on day 1"
+The assistant pushed a hosted Postgres/Prisma stack with JWT auth to look "production
+ready".
 
-### D. Interactive Persona Switcher & Multi-Lens Kanban Board
-- Added a persistent **Interactive Persona Simulator** bar to switch between Samyak (Owner), Abhishek (Sales), and Siddhant (Production) in 1 click.
-- Built 4 perspective lenses into the Pipeline Board:
-  - 🌐 *All Jobs Overview*
-  - 💼 *Sales Lens* (deals, quotes, and enquiries)
-  - ⚙️ *Production Floor Lens* (pre-flight checklists, SLA timers)
-  - 👑 *Owner Lens* (revenue per stage, bottleneck flags)
+**What was rejected & why:** a 3-person internal tool and a 3-day demo don't need a
+database service, migrations on every change, or an auth framework. We kept **SQLite
+(`better-sqlite3`) with explicit SQL** (zero-ops, inspectable, committed seed) and
+**cookie sessions with seeded role accounts**. Prisma remains only as a reference schema.
+This is a scope cut we state out loud in the README rather than pretend it is an
+oversight.
 
-### E. Interactive Pre-Flight Subtask Checklist (`/api/jobs/update-checklist`)
-- Integrated a live checklist on Job Details to track:
-  - Vector artwork verification
-  - Paper stock reservation
-  - Client proof approval
-  - Machine print run
-  - Lamination & precision die-cutting
-  - Final QC & packaging
+### 1.3 Data-model negotiation — the 11-stage pipeline
+The AI (following an external playbook) proposed an 11-stage pipeline: Inquiry → Quoted →
+Confirmed → Design → Design Approved → In Production → Finishing → QC → Ready for Delivery
+→ Delivered → Payment Settled → Follow-up.
 
----
+**What we changed:** we kept **6 board columns** because a 6-column kanban is what the
+demo can actually show on one screen, and mapped the finer stages onto first-class data
+instead of columns: advance payment → `paid_upfront`, design approval/finishing/QC → the
+6-step pre-flight checklist inside Printing, delivery follow-up → the re-engagement cadence
+engine. Every lost "stage" is still a tracked fact somewhere — nothing vanished into a
+note. Documented in README § Data model.
 
-## 3. Technology Choices & Trade-offs
+### 1.4 Ownership model — the core decision
+**AI first draft:** `jobs.assigned_to` set once at creation ("Abhishek owns this job") —
+simple, but wrong the moment the job hits the press.
 
-| Decision | Alternative Considered | Why Chosen |
-|---|---|---|
-| **SQLite via `better-sqlite3`** | PostgreSQL / Prisma | Zero external network dependencies, file-backed reliability in sandboxes, synchronous sub-millisecond queries. |
-| **Domain-specific NLP Engine** | Generic OpenAI API wrapper | 100% reliable in air-gapped/sandbox environments, instant response (<15ms), zero API cost, completely predictable print parsing. |
-| **Server Components + Client Island Micro-Interactions** | Full SPA (React Router) | Instant initial page loads with Next.js SSR, lightweight bundles, smooth client modals for AI tools. |
-| **Proxy-Safe HTTP 303 Redirects** | Client `router.push` only | Clean Form POST compatibility behind Render/preview proxies with no host leakage. |
+**Rejected in favour of:** stage-derived ownership. `src/lib/pipeline.mjs` is the single
+source of truth mapping every stage to its owner role (Enquiry–Design → Sales, Printing–
+Ready → Production, Delivered → Sales for payment/follow-up). The stage-transition API
+auto-reassigns the job to the stage owner and writes the handoff to the audit trail. This
+directly answers the team's complaint: *"Nobody flagged it, wasn't clear whose job it
+was."*
 
----
-
-## 4. Verification & Testing
-
-1. **Unit & Feature Test Suite (`tests/features.test.mjs`):**
-   - Verified WhatsApp lead parser on complex Hindi-English inputs with gold foil stamping.
-   - Verified 1-Click Repeat Order proposal generation for BrightTech Solutions.
-   - Verified Production Risk Analysis on overdue jobs.
-   - Verified Copilot financial calculations and communication drafting.
-   - *Result: 4/4 passing.*
-
-2. **Deployment & Proxy Smoke Tests (`tests/render.test.mjs`):**
-   - Verified login health check, cookie session persistence across all 3 roles, rejected invalid credentials, and proxy header redirection safety.
-   - *Result: 6/6 passing.*
-
-3. **Production Build:**
-   - `npm run build` generates all 19 static/dynamic routes with zero TypeScript or bundling errors.
+### 1.5 Seed data
+We seeded 3 users, 12 customers (regulars, one-offs, dormant regulars, a deliberately
+silent repeat customer), and 27 jobs across a **multi-month order history** — including one
+intentionally late job (Singh & Sons, #7) and customers whose own cadence makes them due
+for a check-in. Dates are generated relative to seed time so the demo stays coherent.
 
 ---
 
-*This document is part of the submission per the "What to Submit" requirements.*
+## Day 2 — Core UX
+
+### 2.1 Messy intake parser — three prompt/rule iterations (kept to show refinement)
+- **v1 (naive regex):** keyword-spotting only. Extracted clean sentences fine but fell
+  over on typos and Hindi-English mixes.
+- **v2 (add-on heuristics):** greedy lookahead for company words. Introduced a real bug —
+  the word `studio` matched *inside* `Studios` and captured the rest of the sentence as the
+  customer name ("s new cafe launch this weekend").
+- **v3 (shipped):** word-bounded company keywords + a typo-tolerant **fuzzy matcher**
+  (bigram similarity over 1–3 word windows) against existing accounts. Result: the parser
+  either resolves to a real customer with a confidence level, or honestly reports *no
+  match* — it never guesses a person's identity (see 2.2).
+
+### 2.2 AI suggestion — hard-code "if text mentions 'apex', create Rohan Mehta"
+The assistant had special-cased two demo strings, inventing a contact name for a company
+("Apex Media Tech → Rohan Mehta") and a person for a first name ("priya → Priya Nair").
+
+**What was rejected & why:** that is exactly the kind of fabricated identity a production
+parser must never ship. We deleted both hard-codes. Priya resolves through a real seeded
+account match; Apex-style text resolves as "company + Contact placeholder" with a clear
+`no match`. The UI then asks a human to confirm before anything is created.
+
+### 2.3 AI suggestion — silently create the customer when the parser matches
+**Rejected.** The parser result is always human-confirmed: the modal shows *Matched
+existing account — high confidence (fuzzy similarity)* with an explicit **Attach to
+existing account / Create new account instead** toggle. Nothing touches the database until
+a person clicks "Create Enquiry in Pipeline". This is the human-in-the-loop safety
+decision we call out in the README and would call out in an interview.
+
+### 2.4 Repeat orders & customer 360
+Built 1-click repeat order generation from the customer's last delivered job (specs +
+price + artwork status) and a customer profile page with full order history, LTV, AOV, and
+communication log — the direct answer to "took three phone calls just to confirm."
+
+---
+
+## Day 3 — AI layer, polish, verification
+
+### 3.1 NL Copilot — AI suggestion "just let an LLM read the SQLite file / text-to-SQL"
+**Rejected.** We built the Copilot as a **constrained intent router**: a fixed set of
+safe, read-only handlers (financials, risk, customer history, late jobs, drafts,
+re-engagement, briefing, unquoted leads) with a graceful fallback. No user text ever
+becomes SQL or triggers a write. This mirrors function-calling allow-lists and is the
+security posture we would defend in the follow-up call.
+
+### 3.2 Proactive re-engagement
+Built cadence learning per repeat customer (average gap between completed orders). If a
+repeat customer is silent past their own window and has no open job, they surface on the
+Sales dashboard and in Copilot. Customers with open jobs are never nagged. AI proposed
+flagging anyone older than 30 days; **we rejected a flat threshold** in favour of
+per-customer cadence (with a 60-day fallow floor for very slow cycles) so a genuinely
+two-month-cycle client isn't nagged after four weeks.
+
+### 3.3 Daily briefing
+AI proposed an LLM paragraph. **We shipped deterministic formatting first** (live counts →
+headline + bullets per role) — cheaper, exact, testable — and note LLM polish as the
+obvious next step behind the same function.
+
+### 3.4 Scenario stress-tests (the brief's three scenarios)
+Run as automated tests + live walkthroughs (details in README § How the three scenarios
+were tested):
+1. Repeat order under ~15 seconds — ✅ (`generateRepeatOrderPackage`, customer profile UI)
+2. Messy enquiry with a typo'd name — ✅ resolves to existing account with confidence,
+   human chooses attach-vs-new; new companies flagged no-match
+3. Job going late — ✅ auto-flags on dashboards, CRITICAL risk, apology-draft generated
+
+### 3.5 Verification (measured this session, not restated)
+`npm test` → 11/11 · `npm run build` → 19/19 routes · live deploy smoke → 6/6 · auto-owner
+handoff verified end-to-end on a throwaway DB copy. Full numbers: `VERIFICATION_REPORT.md`.
+
+---
+
+*This document is part of the submission per the "What to submit" requirements; the raw
+session transcript remains available in the Arena platform.*

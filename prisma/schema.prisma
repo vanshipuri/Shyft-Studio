@@ -1,3 +1,10 @@
+// Reference schema for Shyft Studio (documentation only).
+//
+// IMPORTANT: the runtime does NOT use Prisma — the app reads/writes SQLite through
+// src/lib/db.mjs (better-sqlite3, explicit SQL). This file exists so the data model can
+// be reviewed as a typed schema and kept in sync with the DDL in src/lib/db.mjs and
+// src/scripts/seed.js. If you change the model here, mirror it in both of those files.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,6 +20,10 @@ enum Role {
   PRODUCTION
 }
 
+// Every stage has exactly one default owner role, enforced in app logic by
+// src/lib/pipeline.mjs (ENQUIRY/QUOTED/DESIGN/DELIVERED → SALES,
+// PRINTING/READY → PRODUCTION). Jobs are auto-reassigned to the stage owner
+// on every transition and the handoff is written to Activity.
 enum JobStage {
   ENQUIRY
   QUOTED
@@ -27,12 +38,11 @@ model User {
   name      String
   email     String   @unique
   role      Role
-  password  String // simple hash for demo
+  password  String // simple demo auth (documented scope cut)
   createdAt DateTime @default(now())
 
-  assignedJobs Job[] @relation("JobAssigned")
-  notes        Note[]
-  activities   Activity[]
+  notes      Note[]
+  activities Activity[]
 }
 
 model Customer {
@@ -44,49 +54,60 @@ model Customer {
   notes     String?
   createdAt DateTime @default(now())
 
-  jobs     Job[]
-  notes    Note[]
+  jobs       Job[]
+  notes      Note[]
   activities Activity[]
 }
 
 model Job {
-  id            Int      @id @default(autoincrement())
-  title         String
-  description   String?
-  stage         JobStage @default(ENQUIRY)
-  assignedToId  Int?
-  assignedTo    User?    @relation("JobAssigned", fields: [assignedToId], references: [id])
-  customerId    Int
-  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  quoteAmount   Float?
-  dueDate       DateTime?
-  paidUpfront   Boolean  @default(false)
-  priority      String   @default("normal") // low, normal, high, urgent
-  notes         String?
-  isLate        Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  title        String
+  description  String?
+  stage        JobStage @default(ENQUIRY)
+  assignedToId Int?
+  customerId   Int
+  quoteAmount  Float?
+  dueDate      DateTime?
+  paidUpfront  Boolean  @default(false) // advance received = order confirmed
+  priority     String   @default("normal") // low | normal | high | urgent
+  notes        String?
+  isLate       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  leadSource   String   @default("Direct")
+  specsSummary String? // canonical one-line spec, e.g. "500 Visiting Cards (300gsm Matte)"
+  checklist    String? // JSON: 6 pre-flight tasks (proof, paper, print, finishing, QC)
+  riskScore    String   @default("LOW") // LOW | MODERATE | HIGH | CRITICAL
+  riskReason   String?
 
-  activities Activity[]
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   notes      Note[]
+  activities Activity[]
 }
 
+// Free-text communication log (customer- and/or job-scoped).
 model Note {
-  id        Int      @id @default(autoincrement())
-  content   String
-  createdBy Int
-  author    User     @relation(fields: [createdBy], references: [id])
+  id         Int      @id @default(autoincrement())
+  content    String
+  createdBy  Int
   customerId Int?
-  jobId     Int?
-  createdAt DateTime @default(now())
+  jobId      Int?
+  createdAt  DateTime @default(now())
+
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  job      Job?      @relation(fields: [jobId], references: [id], onDelete: Cascade)
 }
 
+// Audit trail / JobStageHistory: every stage move, ownership handoff, checklist
+// tick, and note, with user + timestamp.
 model Activity {
-  id        Int      @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   description String
-  byUserId  Int
-  user      User     @relation(fields: [byUserId], references: [id])
-  jobId     Int?
-  customerId Int?
-  createdAt DateTime @default(now())
+  byUserId    Int
+  jobId       Int?
+  customerId  Int?
+  createdAt   DateTime @default(now())
+
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  job      Job?      @relation(fields: [jobId], references: [id], onDelete: Cascade)
 }

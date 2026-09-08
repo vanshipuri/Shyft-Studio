@@ -1,8 +1,88 @@
 // Domain-specific AI Engine for Shyft Studio
-// Handles messy WhatsApp lead ingestion, repeat order intelligence, production risk analysis, and natural language copilot reasoning.
+// Handles messy WhatsApp lead ingestion, repeat order intelligence, production risk analysis,
+// proactive re-engagement nudges, daily briefings, and natural language copilot reasoning.
 
 import { db, getCustomers, getJobs, getLateJobs, getStageCounts, getCustomerJobs, getJobById, getCustomerById } from "./db.mjs";
 import { repriceItem } from "./pricing.mjs";
+
+// ---------------------------------------------------------------------------
+// Small string-similarity helpers (no external deps, deterministic & offline).
+// Used to match messy, typo-ridden WhatsApp mentions against existing accounts
+// WITHOUT auto-creating duplicate customers.
+// ---------------------------------------------------------------------------
+
+const FUZZY_STOPWORDS = new Set([
+  "the", "this", "that", "with", "from", "have", "for", "and", "our", "your", "you", "are",
+  "not", "need", "please", "hi", "hey", "dear", "sir", "maam", "will", "can", "just", "about",
+  "their", "there", "them", "then", "than", "when", "what", "which", "while", "bhaiya",
+  "chahiye", "urgently", "want", "has", "had", "been", "were", "was", "but", "also", "would",
+  "could", "should", "into", "onto", "before", "after", "kal", "aaj"
+]);
+
+function normKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function bigrams(value) {
+  const s = normKey(value);
+  if (s.length < 2) return s.length === 1 ? new Set([s]) : new Set();
+  const set = new Set();
+  for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+  return set;
+}
+
+/** Sørensen–Dice similarity over character bigrams (0..1). Space-insensitive. */
+function diceSimilarity(a, b) {
+  const A = bigrams(a);
+  const B = bigrams(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let overlap = 0;
+  for (const g of A) if (B.has(g)) overlap++;
+  return (2 * overlap) / (A.size + B.size);
+}
+
+/**
+ * Finds the most plausible EXISTING customer behind a messy message, if any.
+ * Scans 1–3 word windows of the raw text and compares each against every
+ * account's name and company with typo-tolerant similarity.
+ *
+ * Returns null when nothing is close enough OR when two accounts are equally
+ * plausible (ambiguous) — in both cases the caller keeps the lead as "new" and
+ * lets a human decide. Never auto-links on a weak guess.
+ */
+function findBestCustomerMatch(rawText, customers) {
+  const words = String(rawText || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s&.+]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !FUZZY_STOPWORDS.has(w));
+
+  if (!words.length || !customers.length) return null;
+
+  const scored = customers.map((customer) => {
+    const nameKey = normKey(customer.name);
+    const companyKey = normKey(customer.company || "");
+    let best = 0;
+    for (let start = 0; start < words.length; start++) {
+      for (let len = 1; len <= 3 && start + len <= words.length; len++) {
+        const window = words.slice(start, start + len).join("");
+        const s = Math.max(
+          nameKey ? diceSimilarity(window, nameKey) : 0,
+          companyKey ? diceSimilarity(window, companyKey) : 0
+        );
+        if (s > best) best = s;
+      }
+    }
+    return { customer, best };
+  });
+
+  scored.sort((a, b) => b.best - a.best);
+  const top = scored[0];
+  if (!top || top.best < 0.62) return null;
+  // If two accounts are near-tied, the mention is ambiguous — defer to a human.
+  if (scored[1] && top.best - scored[1].best < 0.12) return null;
+  return { customer: top.customer, confidence: top.best >= 0.78 ? "high" : "medium" };
+}
 
 /**
  * Parses unstructured/messy lead text (WhatsApp messages, voice note transcripts, rough emails).
@@ -37,10 +117,12 @@ export function parseMessyLead(rawText) {
     detectedEmail = emailMatch[0];
   }
 
-  // Name / Company heuristics
+  // Name / Company heuristics — light extraction for an explicit mention
+  // (keywords are word-bounded so "Zingaro Studios" never triggers the
+  // "studio:" rule and swallows the rest of the sentence)
   const namePatterns = [
     /(?:from|myself|i am|this is|naam|name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
-    /(?:company|firm|agency|studio|enterprise|pvt ltd|ltd|brand|team)\s*(?:is|:|-)?\s*([A-Za-z0-9\s&]+?)(?=(?:,|\.|\n|phone|urgent|need|want|chahiye|$))/i,
+    /\b(?:company|firm|agency|studio|enterprise|pvt ltd|ltd|brand|team)\b\s*(?:is|:|-)?\s*([A-Za-z0-9\s&]+?)(?=(?:,|\.|\n|phone|urgent|need|want|chahiye|$))/i,
     /(?:for|regards|by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
   ];
 
@@ -48,7 +130,7 @@ export function parseMessyLead(rawText) {
     const m = text.match(pattern);
     if (m && m[1]) {
       const val = m[1].trim();
-      if (!detectedCompany && /(?:pvt|ltd|solutions|media|tech|interiors|events|corp|inc|studio)/i.test(val)) {
+      if (!detectedCompany && /(?:pvt|ltd|solutions|media|tech|interiors|events|corp|inc|studio|hotels|fitness|traders|designs)/i.test(val)) {
         detectedCompany = val;
       } else if (detectedName === "Unknown Lead") {
         detectedName = val;
@@ -56,25 +138,51 @@ export function parseMessyLead(rawText) {
     }
   }
 
-  // Match existing customer if mentioned
+  // --- Customer identity resolution --------------------------------------
+  // 1) Exact mention of an existing account (name or company) → attach to it.
+  // 2) Otherwise, typo-tolerant fuzzy match against existing accounts.
+  // 3) Otherwise this is genuinely a new customer.
+  // The parsed result is ALWAYS human-confirmed before anything is written to
+  // the database — the parser never auto-creates records silently.
   const existingCustomers = getCustomers();
-  for (const c of existingCustomers) {
-    if (lower.includes(c.name.toLowerCase()) || (c.company && lower.includes(c.company.toLowerCase()))) {
-      detectedName = c.name;
-      detectedCompany = c.company || detectedCompany;
-      detectedPhone = c.phone || detectedPhone;
-      detectedEmail = c.email || detectedEmail;
-      break;
+  let customerMatch = null;
+
+  const exactHit = existingCustomers.find(
+    (c) => lower.includes(c.name.toLowerCase()) || (c.company && lower.includes(c.company.toLowerCase()))
+  );
+
+  if (exactHit) {
+    customerMatch = {
+      id: exactHit.id,
+      name: exactHit.name,
+      company: exactHit.company || "",
+      confidence: "high",
+      method: "exact mention"
+    };
+    detectedName = exactHit.name;
+    detectedCompany = exactHit.company || detectedCompany;
+    detectedPhone = exactHit.phone || detectedPhone;
+    detectedEmail = exactHit.email || detectedEmail;
+  } else {
+    const fuzzy = findBestCustomerMatch(text, existingCustomers);
+    if (fuzzy) {
+      customerMatch = {
+        id: fuzzy.customer.id,
+        name: fuzzy.customer.name,
+        company: fuzzy.customer.company || "",
+        confidence: fuzzy.confidence,
+        method: "fuzzy similarity"
+      };
+      detectedName = fuzzy.customer.name;
+      detectedCompany = fuzzy.customer.company || detectedCompany;
+      detectedPhone = fuzzy.customer.phone || detectedPhone;
+      detectedEmail = fuzzy.customer.email || detectedEmail;
     }
   }
 
-  if (detectedName === "Unknown Lead" && detectedCompany) {
+  if (!customerMatch && detectedName === "Unknown Lead" && detectedCompany) {
+    // E.g. "Nexus Media" (new company) → a neutral "Nexus Contact" placeholder.
     detectedName = detectedCompany.split(" ")[0] + " Contact";
-  } else if (detectedName === "Unknown Lead" && /priya/i.test(lower)) {
-    detectedName = "Priya Nair";
-  } else if (detectedName === "Unknown Lead" && /apex/i.test(lower)) {
-    detectedCompany = "Apex Media Tech";
-    detectedName = "Rohan Mehta";
   }
 
   // 2. Extract Items & Quantities
@@ -202,7 +310,8 @@ export function parseMessyLead(rawText) {
       company: detectedCompany || "Independent / Individual",
       phone: detectedPhone || "+91 98XXX XXXXX",
       email: detectedEmail || "pending@client.in",
-      isNew: !existingCustomers.some(c => c.name.toLowerCase() === detectedName.toLowerCase())
+      isNew: !customerMatch,
+      match: customerMatch
     },
     job: {
       title: jobTitle,
@@ -217,6 +326,146 @@ export function parseMessyLead(rawText) {
     items,
     missingInfo,
     suggestedReply
+  };
+}
+
+/**
+ * Proactive Re-engagement Nudges ("catch the next order before they even ask").
+ *
+ * For repeat customers we learn their reorder cadence from delivered-job
+ * history. When a customer is overdue past their own cadence (and has no open
+ * job), they surface as "due for a check-in" — turning tribal knowledge in
+ * Abhishek's head into a system rule the whole team can see.
+ */
+export function computeReengagementNudges({ now: nowInput } = {}) {
+  const now = nowInput ? new Date(nowInput) : new Date();
+  const DAY = 1000 * 60 * 60 * 24;
+  const customers = getCustomers();
+  const jobs = getJobs();
+
+  const customersById = new Map(customers.map((c) => [c.id, c]));
+  const jobsByCustomer = new Map();
+  for (const job of jobs) {
+    if (!jobsByCustomer.has(job.customer_id)) jobsByCustomer.set(job.customer_id, []);
+    jobsByCustomer.get(job.customer_id).push(job);
+  }
+
+  const nudges = [];
+
+  for (const customer of customers) {
+    const customerJobs = jobsByCustomer.get(customer.id) || [];
+    const delivered = customerJobs
+      .filter((j) => j.stage === "DELIVERED")
+      .sort((a, b) => new Date(a.updated_at || a.created_at) - new Date(b.updated_at || b.created_at));
+
+    // Nudges are for REPEAT customers (>=2 completed orders) — one-offs get a
+    // generic follow-up from Sales, not a cadence rule.
+    if (delivered.length < 2) continue;
+
+    const last = delivered[delivered.length - 1];
+    const lastDate = new Date(last.updated_at || last.created_at);
+    const daysSince = Math.floor((now.getTime() - lastDate.getTime()) / DAY);
+
+    // Average gap between successive completed orders = personal reorder cadence.
+    let gaps = 0;
+    for (let i = 1; i < delivered.length; i++) {
+      const prev = new Date(delivered[i - 1].updated_at || delivered[i - 1].created_at);
+      const next = new Date(delivered[i].updated_at || delivered[i].created_at);
+      gaps += Math.max(1, Math.round((next.getTime() - prev.getTime()) / DAY));
+    }
+    const avgIntervalDays = Math.max(1, Math.round(gaps / (delivered.length - 1)));
+
+    const hasOpenJob = customerJobs.some((j) => j.stage !== "DELIVERED");
+    // Overdue past their own cadence (with a minimum cushion), or > 60 days
+    // silent for any repeat account.
+    const overCushion = daysSince >= Math.min(Math.ceil(avgIntervalDays * 1.25), avgIntervalDays + 20);
+    const fallow = daysSince >= 60;
+    const dueForCheckIn = !hasOpenJob && (overCushion || fallow);
+
+    if (dueForCheckIn) {
+      nudges.push({
+        customerId: customer.id,
+        customerName: customer.name,
+        company: customer.company || "",
+        phone: customer.phone || "",
+        lastOrderId: last.id,
+        lastOrderTitle: last.title,
+        lastOrderDate: lastDate.toISOString().split("T")[0],
+        avgIntervalDays,
+        daysSinceLastOrder: daysSince,
+        overdueByDays: Math.max(0, daysSince - avgIntervalDays),
+        priority: daysSince >= avgIntervalDays * 1.75 ? "high" : "normal"
+      });
+    }
+  }
+
+  nudges.sort((a, b) => b.overdueByDays - a.overdueByDays);
+  return nudges;
+}
+
+/**
+ * Daily Briefing — the owner's "one screen" summary.
+ * Deterministic formatting over live data (optionally LLM-polished later).
+ * Answers, per role: what actually needs attention TODAY.
+ */
+export function generateDailyBriefing(role = "OWNER") {
+  const allJobs = getJobs();
+  const lateJobs = getLateJobs();
+  const stages = getStageCounts();
+  const stageMap = Object.fromEntries(stages.map((s) => [s.stage, s.count]));
+  const nudges = computeReengagementNudges();
+
+  const activeJobs = allJobs.filter((j) => j.stage !== "DELIVERED");
+  const enquiryJobs = allJobs.filter((j) => j.stage === "ENQUIRY");
+  const quotedJobs = allJobs.filter((j) => j.stage === "QUOTED");
+  const printJobs = allJobs.filter((j) => j.stage === "PRINTING" || j.stage === "READY");
+  const pipelineValue = activeJobs.reduce((s, j) => s + (j.quote_amount || 0), 0);
+
+  const now = Date.now();
+  const DAY = 1000 * 60 * 60 * 24;
+  const agingEnquiries = enquiryJobs.filter((j) => j.created_at && now - new Date(j.created_at).getTime() > 2 * DAY);
+  const agingQuotes = quotedJobs.filter((j) => j.created_at && now - new Date(j.created_at).getTime() > 7 * DAY);
+  const atRisk = allJobs.filter((j) => j.is_late || (j.due_date && new Date(j.due_date).getTime() < now && j.stage !== "DELIVERED"));
+
+  const headline =
+    lateJobs.length > 0
+      ? `${lateJobs.length} job(s) at risk, ${nudges.length} repeat client(s) due for a check-in, ${agingEnquiries.length} enquiry(ies) aging without a quote.`
+      : `All jobs on schedule — ${nudges.length} repeat client(s) due for a check-in, ${agingEnquiries.length} enquiry(ies) aging without a quote.`;
+
+  const bullets = {
+    OWNER: [
+      `Pipeline: ₹${pipelineValue.toLocaleString("en-IN")} across ${activeJobs.length} active jobs.`,
+      `${atRisk.length} job(s) at risk of missing their promise date (top: ${atRisk[0] ? `#${atRisk[0].id} ${atRisk[0].title}` : "none"}).`,
+      `${nudges.length} repeat customer(s) overdue for a re-order — ask Sales to check in.`,
+      `${agingEnquiries.length} enquiry(ies) unquoted for over 48h; ${agingQuotes.length} quote(s) awaiting sign-off for over a week.`
+    ],
+    SALES: [
+      `${enquiryJobs.length} enquiry(ies) open — ${agingEnquiries.length} older than 48h and need a quote today.`,
+      `${quotedJobs.length} quoted deal(s) awaiting client confirmation (${agingQuotes.length} older than a week).`,
+      `${nudges.length} repeat client(s) due for a check-in based on their own order cadence.`,
+      `${printJobs.length} job(s) on the floor that need proof sign-off or delivery follow-up.`
+    ],
+    PRODUCTION: [
+      `${stageMap.PRINTING || 0} job(s) on the press / in finishing, ${stageMap.READY || 0} ready for dispatch.`,
+      `${atRisk.length} job(s) flagged at risk of missing their due date — confirm ETA with Sales.`,
+      `${stageMap.DESIGN || 0} job(s) waiting in design (need client proof sign-off to start printing).`
+    ]
+  };
+
+  return {
+    role,
+    headline,
+    bullets: bullets[role] || bullets.OWNER,
+    counts: {
+      atRisk: atRisk.length,
+      late: lateJobs.length,
+      overdueCheckIns: nudges.length,
+      agingEnquiries: agingEnquiries.length,
+      agingQuotes: agingQuotes.length,
+      pipelineValue,
+      activeJobs: activeJobs.length
+    },
+    date: new Date().toISOString().split("T")[0]
   };
 }
 
@@ -390,6 +639,7 @@ export function analyzeProductionRisks() {
  */
 export function processCopilotQuery(queryText, userRole = "OWNER") {
   const query = String(queryText || "").trim().toLowerCase();
+  const customerList = getCustomers();
 
   // 1. Draft Communications (WhatsApp follow-ups, delay apologies, quote emails) - Check this FIRST
   if (/draft|apology|message|whatsapp|reply|write to|email/.test(query)) {
@@ -408,8 +658,46 @@ export function processCopilotQuery(queryText, userRole = "OWNER") {
     };
   }
 
-  // 2. Revenue & Financial Summary
-  if (/revenue|pipeline value|financial|money|total quoted|income|sales summary|how much/.test(query)) {
+  // 2. Daily Briefing — one-screen "what needs me today" per role
+  if (/briefing|daily digest|good morning|morning (update|briefing)|what should i (focus|do|prioritize)/.test(query)) {
+    const brief = generateDailyBriefing(userRole);
+    return {
+      answer: `### 📌 Daily Briefing — ${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}\n\n${brief.headline}\n\n${brief.bullets.map((b) => `• ${b}`).join("\n")}\n\n*Open the Dashboard for the live view behind this summary.*`
+    };
+  }
+
+  // 3. Proactive re-engagement — repeat customers overdue for their next order
+  if (/check.?in|hasn.?t ordered|haven.?t ordered|not ordered in|who (has|hasn.?t|haven.?t).*ordered|re.?engag|cadence|churn|due for (a )?(repeat|re.?order|new order)|repeat (customers?|clients?|accounts?) (who|due|overdue|not)|catch .*next (order|job)/.test(query)) {
+    const due = computeReengagementNudges();
+    const customerRef = customerList.find(
+      (c) => query.includes(c.name.toLowerCase()) ||
+        (c.company && c.company.toLowerCase().split(/[^a-z0-9]+/).some((t) => t.length >= 5 && query.includes(t)))
+    );
+    const filtered = customerRef ? due.filter((n) => n.customerId === customerRef.id) : due;
+    if (customerRef && !filtered.length) {
+      return { answer: `✅ **${customerRef.name} is not due for a check-in.** They have no open job but are still inside their usual reorder window (or have an active job).` };
+    }
+    if (!filtered.length) {
+      return { answer: "✅ **No repeat customer is currently due for a check-in.** Everyone with a reorder cadence is inside their window or already has an open job." };
+    }
+    const lines = filtered.map(n => `• **${n.customerName}**${n.company ? ` (${n.company})` : ""} — ${n.daysSinceLastOrder} days since last order, typical cadence ~${n.avgIntervalDays} days (${n.overdueByDays} days past window).`).join("\n");
+    return {
+      answer: `### 🔔 ${customerRef ? `${customerRef.name} — due for a check-in` : `Repeat Customers Due for a Check-in (${filtered.length})`}\n\n${lines}\n\n👉 *Open their customer profile and use **1-Click Repeat Order** to prep the next quote in seconds.*`
+    };
+  }
+
+  // 4. Sales intake hygiene — unquoted / aging enquiries
+  if (/unquoted|enquir(y|ies) (that )?need|leads? (needing|that need)|aging/.test(query)) {
+    const open = getJobs().filter(j => j.stage === "ENQUIRY" && !j.quote_amount);
+    if (!open.length) return { answer: "✅ **No unquoted enquiries.** Every open enquiry has a quote attached." };
+    const lines = open.map(j => { const c = getCustomerById(j.customer_id); return `• **#${j.id}** ${j.title} — ${c?.name || "Customer"} (created ${j.created_at ? j.created_at.split("T")[0] : "?"})`; }).join("\n");
+    return {
+      answer: `### 🎯 Unquoted Enquiries Needing Follow-up (${open.length})\n\n${lines}\n\n💡 *Tip: run the AI WhatsApp Intake parser to turn any of these into a structured quote.*`
+    };
+  }
+
+  // 5. Revenue & Financial Summary
+  if (/revenue|pipeline value|financial|money|total quoted|quoted deals|value of quoted|income|sales summary|how much/.test(query)) {
     const allJobs = getJobs();
     const activeJobs = allJobs.filter(j => j.stage !== "DELIVERED");
     const pipelineValue = activeJobs.reduce((sum, j) => sum + (j.quote_amount || 0), 0);
@@ -422,8 +710,8 @@ export function processCopilotQuery(queryText, userRole = "OWNER") {
     };
   }
 
-  // 3. Operational Bottlenecks & Print Floor
-  if (/bottleneck|stuck|machine|print floor|queue|backlog|capacity/.test(query) || (/delay/i.test(query) && !/draft|message/i.test(query))) {
+  // 6. Operational Bottlenecks & Print Floor
+  if (/bottleneck|stuck|machine|print floor|queue|backlog|capacity|throughput|paper stock|lamination|stock alert/.test(query) || (/delay/i.test(query) && !/draft|message/i.test(query))) {
     const riskData = analyzeProductionRisks();
     const bottlenecksList = riskData.bottlenecks.map(b => `• **[${b.stage}]** ${b.description} *(Action: ${b.solution})*`).join("\n");
     return {
@@ -431,18 +719,28 @@ export function processCopilotQuery(queryText, userRole = "OWNER") {
     };
   }
 
-  // 4. Specific customer history & re-orders
-  const customerList = getCustomers();
+  // 7. Specific customer history & re-orders
+  // Exact mention first; otherwise a scored match on first name / company
+  // fragment so "what did Neha from BrightTech order last time?" still resolves.
   let matchedCustomer = null;
+  let bestCustomerScore = 0;
   for (const c of customerList) {
-    const namePart = c.name.toLowerCase();
-    if (query.includes(namePart) || (c.company && query.includes(c.company.toLowerCase()))) {
+    let score = 0;
+    if (query.includes(c.name.toLowerCase())) score += 3;
+    if (c.company && query.includes(c.company.toLowerCase())) score += 3;
+    const nameWords = c.name.toLowerCase().split(" ");
+    if (nameWords.length >= 2 && nameWords[0].length >= 3 && query.includes(nameWords[0])) score += 1.5;
+    if (c.company) {
+      const companyTokens = c.company.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 5);
+      if (companyTokens.some((t) => query.includes(t))) score += 2;
+    }
+    if (score > bestCustomerScore) {
+      bestCustomerScore = score;
       matchedCustomer = c;
-      break;
     }
   }
 
-  if (matchedCustomer && (/order|history|what did|repeat|specs|previous|spend|ltv/.test(query))) {
+  if (matchedCustomer && bestCustomerScore >= 1.5 && (/order|history|what did|repeat|specs|previous|spend|ltv|last|pending|active jobs/.test(query))) {
     const jobs = getCustomerJobs(matchedCustomer.id);
     const totalSpent = jobs.reduce((s, j) => s + (j.quote_amount || 0), 0);
     const jobLines = jobs.map(j => `• **#${j.id} [${j.stage}]** ${j.title} — ₹${(j.quote_amount||0).toLocaleString("en-IN")} *(Due: ${j.due_date ? j.due_date.split("T")[0] : "N/A"})*`).join("\n");
@@ -452,7 +750,7 @@ export function processCopilotQuery(queryText, userRole = "OWNER") {
     };
   }
 
-  // 5. Late / Overdue jobs check
+  // 8. Late / Overdue jobs check
   if (/late|delayed|overdue|behind|urgent/.test(query)) {
     const late = getLateJobs();
     if (!late.length) return { answer: "✅ **All jobs are currently on schedule.** No late orders flagged in the pipeline." };
@@ -462,7 +760,7 @@ export function processCopilotQuery(queryText, userRole = "OWNER") {
     };
   }
 
-  // 6. Stage summary & pipeline overview
+  // 9. Stage summary & pipeline overview
   if (/pipeline|summary|overview|status|stages|all jobs/.test(query)) {
     const stages = getStageCounts();
     const total = stages.reduce((s, r) => s + r.count, 0);
@@ -472,8 +770,8 @@ export function processCopilotQuery(queryText, userRole = "OWNER") {
     };
   }
 
-  // 7. Fallback helpful response
+  // 10. Fallback helpful response
   return {
-    answer: `### 🤖 Shyft Copilot Ready\n\nI can assist with:\n- 📈 **Financials:** *"What is our total pipeline revenue?"*\n- ⚠️ **Operations:** *"Show print floor bottlenecks and machine load"*\n- 👤 **Customer 360:** *"What did Neha from BrightTech order last time?"*\n- ✍️ **Action Drafts:** *"Draft an apology message for Singh & Sons delay"*\n- 🎯 **Sales:** *"Show unquoted leads needing follow-up"*`
+    answer: `### 🤖 Shyft Copilot Ready\n\nI can assist with:\n- 📌 **Daily Briefing:** *"Give me today's briefing"*\n- 📈 **Financials:** *"What is our total pipeline revenue?"*\n- ⚠️ **Operations:** *"Show print floor bottlenecks and machine load"*\n- 👤 **Customer 360:** *"What did Neha from BrightTech order last time?"*\n- ✍️ **Action Drafts:** *"Draft an apology message for Singh & Sons delay"*\n- 🔔 **Re-engagement:** *"Which repeat clients are due for a check-in?"*\n- 🎯 **Sales:** *"Show unquoted leads needing follow-up"*`
   };
 }

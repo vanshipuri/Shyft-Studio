@@ -11,7 +11,7 @@ import {
   getTeamWorkload,
   getCustomerMetrics
 } from "@/lib/db.mjs";
-import { analyzeProductionRisks } from "@/lib/ai-engine.mjs";
+import { analyzeProductionRisks, computeReengagementNudges, generateDailyBriefing } from "@/lib/ai-engine.mjs";
 import AssistantWidget from "@/components/AssistantWidget";
 import RoleSwitcher from "@/components/RoleSwitcher";
 import MessyLeadModal from "@/components/MessyLeadModal";
@@ -31,6 +31,8 @@ export default async function DashboardPage() {
   const metrics = getPipelineMetrics();
   const teamWorkload = getTeamWorkload();
   const riskAnalysis = analyzeProductionRisks();
+  const reengagementNudges = computeReengagementNudges();
+  const briefing = generateDailyBriefing(user.role);
 
   const customerMap = new Map<number, any>(customers.map((c: any) => [c.id, c]));
 
@@ -124,6 +126,55 @@ export default async function DashboardPage() {
         {/* ------------------------------------------------------------- */}
         {user.role === "OWNER" && (
           <div className="space-y-8">
+            {/* Daily Briefing — the owner's one-screen "what needs me today" */}
+            <section className="rounded-3xl bg-gradient-to-br from-brand-950 to-brand-900 text-white shadow-lg shadow-brand-950/10 border border-brand-800/60 p-6 md:p-7 space-y-4 overflow-hidden relative">
+              <div className="absolute -right-10 -top-10 w-44 h-44 bg-amber/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber text-brand-950 flex items-center justify-center font-black text-base shadow-md">📌</div>
+                  <div>
+                    <h3 className="text-lg font-extrabold tracking-tight">Daily Briefing — {briefing.date}</h3>
+                    <p className="text-[11px] text-brand-400 font-medium">Auto-generated from live pipeline data each morning</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-white/10 text-amber border border-white/10 w-fit">
+                  {briefing.counts.atRisk > 0 ? `${briefing.counts.atRisk} at-risk · action needed` : "All clear"}
+                </span>
+              </div>
+
+              <p className="text-sm text-brand-100 leading-relaxed bg-black/20 border border-white/5 rounded-2xl p-3.5 font-medium">
+                {briefing.headline}
+              </p>
+
+              <ul className="grid md:grid-cols-2 gap-x-6 gap-y-1.5 text-xs text-brand-200">
+                {briefing.bullets.map((b: string, i: number) => (
+                  <li key={i} className="flex items-start gap-2 leading-relaxed">
+                    <span className="text-amber mt-0.5 shrink-0">◆</span>
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 text-center">
+                <div className="rounded-xl bg-white/5 border border-white/10 p-2.5">
+                  <div className="text-lg font-black text-amber leading-none">{briefing.counts.atRisk}</div>
+                  <div className="text-[10px] text-brand-400 mt-1 font-semibold uppercase tracking-wide">At-Risk Jobs</div>
+                </div>
+                <div className="rounded-xl bg-white/5 border border-white/10 p-2.5">
+                  <div className="text-lg font-black text-white leading-none">{briefing.counts.overdueCheckIns}</div>
+                  <div className="text-[10px] text-brand-400 mt-1 font-semibold uppercase tracking-wide">Clients Due Check-in</div>
+                </div>
+                <div className="rounded-xl bg-white/5 border border-white/10 p-2.5">
+                  <div className="text-lg font-black text-white leading-none">{briefing.counts.agingEnquiries}</div>
+                  <div className="text-[10px] text-brand-400 mt-1 font-semibold uppercase tracking-wide">Aging Enquiries</div>
+                </div>
+                <div className="rounded-xl bg-white/5 border border-white/10 p-2.5">
+                  <div className="text-lg font-black text-amber leading-none">₹{Math.round(briefing.counts.pipelineValue / 1000)}k</div>
+                  <div className="text-[10px] text-brand-400 mt-1 font-semibold uppercase tracking-wide">Active Pipeline</div>
+                </div>
+              </div>
+            </section>
+
             {/* Executive KPIs */}
             <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="rounded-2xl p-5 shadow-sm border bg-brand-950 text-white">
@@ -348,6 +399,53 @@ export default async function DashboardPage() {
                 </div>
               </div>
             </div>
+
+            {/* Proactive Re-engagement: repeat customers whose own cadence says "call me now" */}
+            <section className="rounded-3xl bg-white border border-brand-200 shadow-sm p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-extrabold text-ink-900">Repeat Customers Due for a Check-in</h3>
+                  <p className="text-xs text-brand-500">Cadence learned from each client's own order history — catch the next order before they ask.</p>
+                </div>
+                <span className={`text-xs font-extrabold px-3 py-1 rounded-full border ${reengagementNudges.length > 0 ? "bg-emerald-soft text-emerald border-emerald/20" : "bg-brand-100 text-brand-600 border-brand-200"}`}>
+                  {reengagementNudges.length} due now
+                </span>
+              </div>
+
+              {reengagementNudges.length > 0 ? (
+                <div className="grid md:grid-cols-2 gap-3">
+                  {reengagementNudges.map((n: any) => (
+                    <div key={n.customerId} className="p-4 rounded-2xl border border-brand-200 bg-brand-50/50 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <strong className="text-sm font-extrabold text-ink-900 block">{n.customerName}</strong>
+                          <span className="text-[11px] text-brand-500">{n.company || "Independent Account"}</span>
+                        </div>
+                        {n.priority === "high" ? (
+                          <span className="text-[9px] bg-rose text-white px-2 py-0.5 rounded-full font-black">HOT LEAD</span>
+                        ) : (
+                          <span className="text-[9px] bg-amber text-brand-950 px-2 py-0.5 rounded-full font-black">RE-ENGAGE</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-brand-700 leading-relaxed bg-white border border-brand-200/70 rounded-xl p-2.5">
+                        Last order: <strong>Job #{n.lastOrderId}</strong> — {n.lastOrderTitle} ({n.lastOrderDate})
+                        <br />
+                        <strong>{n.daysSinceLastOrder} days</strong> since last order · usual cadence ~<strong>{n.avgIntervalDays} days</strong> · <strong className="text-rose">{n.overdueByDays} days past window</strong>
+                      </p>
+                      <div className="pt-0.5">
+                        <Link href={`/customers/${n.customerId}`} className="text-xs font-bold text-amber-deep hover:underline">
+                          Open profile → 1-click repeat order
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-6 text-center text-xs text-brand-400 bg-brand-50/60 rounded-2xl border border-dashed border-brand-200">
+                  ✅ No repeat customer is currently outside their reorder window.
+                </div>
+              )}
+            </section>
           </div>
         )}
 

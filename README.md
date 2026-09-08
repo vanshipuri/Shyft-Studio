@@ -1,196 +1,272 @@
-# Shyft Studio — Multi-Persona Intelligence & Operations Platform
+# Shyft Studio — The Shared Pipeline for Samyak's 3-Person Print Shop
 
-**Role:** AI Engineer Intern Assignment  
-**Candidate:** Vanshi (simulated submission)  
-**Date:** 8 Sep 2026  
-**Status:** Complete & Verified  
+**One sentence positioning:** *A single shared pipeline that replaces WhatsApp + memory +
+spreadsheets for a 3-person print shop — every job has a stage, exactly one owner, and a
+paper trail.*
+
+**Assignment:** AI Engineer Intern · **Candidate:** Vanshi (simulated submission) ·
+**Date:** 8 Sep 2026 · **Status:** Complete — 11/11 feature tests, 6/6 deploy smoke tests,
+19/19 routes build.
+
+> What Samyak's team actually said, and the system requirement each quote becomes:
+
+| Quote from the team | Real problem | System requirement | Where it lives |
+|---|---|---|---|
+| *"Abhishek's phone is basically our sales pipeline"* | No shared customer/order memory | Central customer + order history | `/customers` Customer 360 with full order history & LTV |
+| *"I don't always know where it stands until he tells me"* | No stage visibility | Explicit job pipeline with current owner + status | `/jobs` Pipeline Board, stage stepper with ownership handoff |
+| *"None of us has a straight answer ready"* | No proactive delay detection | Deadline tracking + at-risk flagging | Risk engine, LATE badges, Owner's Daily Briefing |
+| *"Took three phone calls just to confirm"* | No fast repeat-order lookup | One-click "reorder" from customer history | `RepeatOrderModal` — 1-click "same as last time" |
+| *"Nobody flagged it, wasn't clear whose job it was"* | No ownership model | Every job stage has exactly one clear owner | Stage-derived ownership, auto-reassigns on transition |
+| *"Catching the next one before they even ask"* | No follow-up/retention system | Automated re-engagement nudges from order cadence | "Repeat Customers Due for a Check-in" panel + Copilot |
 
 ---
 
-## Executive Summary: Beyond a Generic Kanban Board
+## 👥 Personas & Product Framing
 
-In a fast-paced 3-person commercial printing business (Owner, Sales, Production), generic Kanban boards fail because each team member has fundamentally different operational priorities:
+The product is **Shyft Studio** (Samyak's print business, as his team already calls it in
+WhatsApp). Rather than a generic Kanban clone, each teammate gets a role-tailored lens over
+the same pipeline:
 
-| Persona | Core Responsibility | Pain Point Solved by this Platform |
+| Persona | Day-to-day | Role lens in the app |
 |---|---|---|
-| **👑 Samyak (Owner)** | Financial health & risk mitigation | Instant pipeline revenue visibility, bottleneck detection, and customer LTV without needing to call Abhishek. |
-| **💼 Abhishek (Sales)** | Ingestion, quoting & repeat orders | Converts unstructured Hindi/English WhatsApp chats into structured quotes in seconds; 1-click repeat orders for regular clients. |
-| **⚙️ Siddhant (Production)** | Machine throughput & quality control | Prioritized print queue, pre-flight checklists (paper stock, proofing, lamination), and proactive SLA delay alarms. |
-
-Rather than locking everyone into an identical static view, **Shyft Studio** provides **role-tailored dashboard lenses, specialized quick actions, and domain-specific AI automation**.
+| 👑 **Samyak Mehta** (Owner) | Financial health, risk, clients | Executive KPIs, Operational Bottleneck Radar, Team Workload, LTV leaderboard, **Daily Briefing** |
+| 💼 **Abhishek Rao** (Sales) | Intake, quoting, repeat orders, follow-ups | Messy WhatsApp intake, unquoted-enquiry radar, 1-click repeat orders, **re-engagement check-ins** |
+| ⚙️ **Siddhant Yadav** (Production) | Print floor, QC, machine queues | Priority print queue, pre-flight checklists, paper/machine alerts, SLA alarms |
 
 ---
 
-## 🌟 Innovative AI & Engineering Features
+## 🗂️ Data Model
 
-### 1. 📱 AI Messy Channel Lead Ingestion (WhatsApp & Audio Transcript Parser)
-- **Problem:** Customers message on WhatsApp in mixed Hindi/English (e.g. *"bhaiya 500 visiting cards chahiye urgently matte finish 300gsm with gold foil for Nexus Media and 100 corporate brochures before Friday"*).
-- **AI Engine Solution (`/api/ai/parse-lead`):**
-  - Extracts customer contact, company name, line items, quantities, paper GSM, and specialized finishing.
-  - Automatically calculates standard industry pricing estimates (₹) and target turnaround deadlines.
-  - Flags missing customer specifications (e.g., missing fold style or unconfirmed artwork).
-  - Generates a 1-click polite WhatsApp clarification reply to send back to the client.
-  - 1-Click **"Create Enquiry in Pipeline"** button creates customer and job records directly in SQLite.
+The schema is deliberately small (SQLite, five tables). Every table maps to a playbook
+entity:
 
-### 2. 🔄 "Same as Last Time" 1-Click Repeat Order Assistant
-- **Problem:** Regular clients (e.g. BrightTech Solutions, Vihaan Interiors) call asking for *"the same order as last month"*.
-- **AI Solution (`/api/ai/repeat-order`):**
-  - Scans historical completed jobs, extracts exact paper weights, coating specs, and past pricing.
-  - Generates a ready-to-run repeat quote in seconds with artwork pre-linked, eliminating repetitive data entry.
+```
+users       (Samyak / Abhishek / Siddhant — OWNER / SALES / PRODUCTION)
+customers   — name, company, phone, email, notes (preferences)
+jobs        — stage, assigned_to, customer_id, quote_amount, due_date, paid_upfront,
+              priority, is_late, lead_source, specs_summary, checklist, risk fields
+notes       — free-text comm log, attachable to a customer and/or a job
+activities  — the audit trail: every stage change / handoff / checklist tick, with
+              user + timestamp  (plays the JobStageHistory role)
+```
 
-### 3. ⚙️ Operational Bottleneck Radar & AI Production Risk Engine
-- **Problem:** Print shop bottlenecks happen silently (e.g. paper stock shortages, lamination backlog, proof sign-off delays).
-- **AI Solution (`/api/ai/risk-analysis`):**
-  - Continuously evaluates all active jobs against due dates, machine queues, and stock dependencies.
-  - Categorizes risk levels (`LOW`, `MODERATE`, `HIGH`, `CRITICAL`) and outputs actionable mitigation steps (e.g. *"Stagger jobs across Offset vs Digital presses to clear finishing backlog"*).
+**The pipeline is a first-class concept, not a "status" dropdown.** It lives in
+`src/lib/pipeline.mjs` — the single source of truth:
 
-### 4. 🤖 Context-Aware Shyft Copilot (Natural Language Agent)
-- **Problem:** Team members need fast answers without manual report generation.
-- **Capabilities (`/api/ask`):**
-  - **Financial queries:** *"What is our active pipeline value?"* (calculates live pipeline ₹ totals).
-  - **Floor operations:** *"Show print floor bottlenecks and machine load"*.
-  - **Client 360:** *"What did Neha from BrightTech order last time?"*.
-  - **Action drafts:** *"Draft an apology message for Singh & Sons delay"* or *"Draft follow-up for Priya Nair"*.
-  - Interactive prompt chips dynamically adapt based on the active persona.
+```
+ ENQUIRY   → QUOTED   → DESIGN   → PRINTING   → READY   → DELIVERED
+ [Sales]     [Sales]    [Sales]    [Prod]       [Prod]    [Sales]
+```
 
-### 5. 📋 Pre-Flight Production Checklists & Stage Stepper
-- Interactive subtask verification on `/jobs/[id]`:
-  1. `[x] Vector Artwork & High-Res PDF Verified`
-  2. `[x] Paper Stock Reserved (300gsm / Glossy / Matte)`
-  3. `[ ] Digital Proof Signed Off by Client`
-  4. `[ ] Offset / Digital Print Run Completed`
-  5. `[ ] Lamination, Die-cut & Creasing Finished`
-  6. `[ ] Final Quality Check & Bundled for Delivery`
-- Live checkbox updates auto-persist to the database with a full audit activity trail.
-
-### 6. 👤 Customer 360 & Lifetime Value (LTV) Intelligence
-- Customer profiles (`/customers/[id]`) display:
-  - Total Spend (LTV), Order Count, Delivered Count, and Average Order Value (AOV).
-  - AI Customer Profile preferences (paper weight preferences, rush order frequency).
-  - Side-by-side order history comparison table.
+Every stage carries a **default owner role baked into the model**. On every stage
+transition the job is *re-assigned to the stage owner automatically*, and the audit trail
+records the handoff (`Moved stage DESIGN → PRINTING — now owned by Siddhant Yadav
+(PRODUCTION)`). There is no free-text "current owner" to forget to update. Details the
+playbook models as extra stages are tracked as first-class flags instead of extra columns:
+advance/confirmation → `paid_upfront`, design approval / finishing / QC → the 6-step
+pre-flight checklist inside PRINTING.
 
 ---
 
-## 🛠️ Stack & Architecture Decisions
+## 🔐 Role & Access Design (the judgment call, stated explicitly)
 
-| Layer | Choice | Rationale |
+| Role | Sees | Can do |
 |---|---|---|
-| **Framework** | Next.js 14 (App Router) | Server Components for instant data rendering, client widgets for micro-interactions, API Route handlers. |
-| **Database** | SQLite via `better-sqlite3` | Zero-latency, in-process, relational integrity with foreign keys, no external database dependencies. |
-| **Styling** | Tailwind CSS + custom theme | Consistent design system, high-contrast role badges, responsive grid for Kanban and data tables. |
-| **Auth** | Cookie session (`shyft_session`) + Instant Persona Switcher | Allows recruiters and team members to switch between Samyak, Abhishek, and Siddhant in 1 click. |
-| **AI / NLP** | Domain-specific Heuristic & Parser Engine (`ai-engine.mjs`) | Deterministic, ultra-fast (0.2–1.4 ms warm), 100% offline with zero external API keys. The engine exposes exactly four pure functions (`parseMessyLead`, `generateRepeatOrderPackage`, `analyzeProductionRisks`, `processCopilotQuery`), which is the seam an LLM provider would sit behind — **no provider adapter is wired up yet**; swapping in Claude/OpenAI is a roadmap step, not shipped code. |
+| **Samyak (Owner)** | Everything + business-wide analytics | Everything (override) |
+| **Abhishek (Sales)** | All customers & order history; all enquiries/quotes; production status (read-only lens) | Intake, quotes, repeat orders, notes, stage moves through DESIGN |
+| **Siddhant (Production)** | Floor queue (PRINTING/READY) + job specs; SLA alarms | Stage moves PRINTING/READY, checklist ticks, notes |
+
+**Decision — should Production see pricing?** We chose **yes, show it.** In a 3-person,
+trust-based shop, hiding `quote_amount` from Siddhant adds friction (he prints the thing
+the price is for) with no real security benefit. It is one column in one table — if the
+business ever grows past trust, this is a 5-line config toggle, which we flag rather than
+build speculatively.
+
+**Auth for a 3-day internal tool:** simple role login (seeded users, password
+`password123`, no email verification, no JWT/multi-tenant infra). The **Persona Switcher**
+in the top bar exists so recruiters can experience all three roles in one click; read
+personalization is implemented per role, and write authorization is deliberately lenient
+for the demo. This is a documented scope cut, not an oversight.
 
 ---
 
-## 🚀 How to Run & Test
+## 🏗️ Architecture & Stack
 
-### Option A — Run Locally
+| Layer | Choice | Why |
+|---|---|---|
+| Frontend | Next.js 14 (App Router) + Tailwind | Server components render data instantly; small client "islands" for modals/board; single deployable |
+| Backend | Next.js API routes (form POSTs + JSON) | One unit to run; 303 proxy-safe redirects for deploy previews |
+| Database | SQLite via `better-sqlite3` | File-backed, zero-ops, relational integrity with FKs; committed demo seed |
+| ORM | none at runtime (Prisma schema kept for reference only) | `db.mjs` is explicit SQL — easy to read, no magic |
+| AI | Deterministic domain engine (`ai-engine.mjs`) with a **clean provider seam** | See below |
+| Auth | Cookie session + seeded role accounts | 3-person internal tool |
+
+**Why not LangChain / a vector DB / microservices / Postgres-in-the-cloud?** Because the
+scope is a 3-person print shop and a 3-day build. A deterministic domain engine is faster
+to reason about, debuggable offline, and free to run; its four pure functions
+(`parseMessyLead`, `generateRepeatOrderPackage`, `analyzeProductionRisks`,
+`processCopilotQuery`) are exactly the seam a hosted LLM provider would sit behind — no
+framework needed to swap later. No provider API key is configured, so nothing here calls
+out to the network; this is stated plainly rather than dressed up.
+
+---
+
+## 🤖 AI Features — what, why, and how (with the safety calls)
+
+### a) Messy-channel intake parser (human-in-the-loop, always)
+**What:** paste a raw WhatsApp / voice-transcript / walk-in message; get structured
+customer + line items + specs + a price estimate + a one-click WhatsApp clarification
+draft. **Why:** this is literally how every enquiry arrives. **Safety decisions:**
+1. The parser **never auto-creates anything** — it extracts, shows editable-ish fields and
+   missing-info flags, and only writes to the DB on an explicit human "Create Enquiry in
+   Pipeline" click.
+2. **Customer identity is deduplicated, not duplicated:** exact mentions attach to the
+   existing account; typo'd mentions ("BrghtTech Solutons") are fuzzy-matched
+   (bigram similarity over word windows) and shown as *"Matched existing account —
+   high confidence — Attach vs. Create new"* with a human toggle. Ambiguous or weak
+   matches are reported as *no match* instead of guessed.
+3. Prices always flow through the canonical rate table (`pricing.mjs`) so the engine can
+   never invent a rate.
+
+### b) Natural-language Copilot = constrained intent router, not raw SQL
+**What:** ask "What is our active pipeline value?", "Draft an apology message for Singh &
+Sons delay", "Which repeat clients are due for a check-in?", "Give me today's briefing".
+**Why:** every query maps to one of a **fixed set of safe, read-only intent handlers**
+(financials, risk/bottlenecks, customer history, late jobs, drafts, nudges, briefing,
+unquoted leads). There is no SQL constructed from user text, no arbitrary tool access —
+the same design principle as function-calling with an allow-list. Anything outside the
+intents gets a graceful "here's what I can do" fallback. That is the security decision,
+and it is deliberate: **constrained tool-calling over raw text-to-SQL**, even for an
+internal tool.
+
+### c) Proactive re-engagement nudges ("catch the next one before they ask")
+**What:** for every repeat customer the engine learns their **own reorder cadence** from
+delivered-job history. When they are silent past that cadence (and have no open job) they
+appear on Abhishek's dashboard and in Copilot: *"Meera Shah (Urban Nest) — 119 days since
+last order, typical cadence ~45 days."* Customers with open jobs are never nagged. **Why:**
+this turns the tribal knowledge in Abhishek's head into a system rule anyone can see.
+
+### d) AI-drafted customer update messages
+**What:** when a job is late or at risk, one click drafts a polite, human-sounding
+WhatsApp status message (delay cause, new ETA, apology) — plus follow-up drafts for stale
+enquiries. **Why:** the actual send stays manual (copy-paste from the UI). No WhatsApp
+Business API integration, no SMS gateway — simulated on purpose; see Scope Cuts.
+
+### e) Daily briefing for Samyak
+**What:** a generated one-screen paragraph on the Owner dashboard: *"1 job(s) at risk,
+2 repeat client(s) due for a check-in, 1 enquiry(ies) aging without a quote — pipeline
+₹98,780 across 10 active jobs."* Role-aware variants exist for Sales and Production, and
+Copilot answers "Give me today's briefing". **Why:** it is the owner's stated pain — not
+knowing where things stand — collapsed into one screen.
+
+### f) "Same as last time" repeat orders
+**What:** from any customer profile, generate a repeat quote from their last delivered job
+(specs, price, artwork status), then confirm. That is scenario 1 in ~10 seconds.
+
+---
+
+## ✅ Core feature set (the actual product, in one list)
+
+1. Job creation + full stage pipeline with explicit current owner (auto-assigned per stage)
+2. Customer profile with complete order history + LTV + 1-click repeat order
+3. Role-tailored dashboards — "what's mine right now" per persona
+4. Late / at-risk flagging (deadline vs stage + notes), risk tiers LOW→CRITICAL
+5. Unified audit trail per job (stage moves, handoffs, checklist ticks, notes)
+6. Pre-flight production checklist (proof, paper stock, print, finishing, QC)
+7. Messy-intake parser, NL Copilot, re-engagement nudges, daily briefing (above)
+
+---
+
+## 🚀 Run, Test & Explore
 
 ```bash
-# 1. Install dependencies
 npm ci --include=dev
-
-# 2. Run unit and feature test suite
-npm test
-
-# 3. Start development server
-npm run dev
+npm run build        # 19/19 routes compile
+npm start            # http://localhost:3000 (or: npm run dev)
+npm test             # 11/11 feature tests (engine + data-model)
+npm run test:deploy  # 6/6 — requires the server running (TEST_BASE_URL override supported)
 ```
 
-Open `http://localhost:3000`.
+**Demo credentials (all password `password123`):** `samyak@shyft.studio` (Owner) ·
+`abhishek@shyft.studio` (Sales) · `siddhant@shyft.studio` (Production).
+Use the **Persona Switcher** bar to experience all three lenses from any page.
 
-**Demo Credentials (all use password: `password123`):**
-- **👑 Owner:** `samyak@shyft.studio`
-- **💼 Sales:** `abhishek@shyft.studio`
-- **⚙️ Production:** `siddhant@shyft.studio`
+**A 5-minute tour:** Dashboard → `AI WhatsApp Intake` → Preset #1 (watch extraction,
+pricing, missing-info flags, fuzzy matching on existing accounts) → `Create Enquiry in
+Pipeline` → the new card appears on `/jobs`. Then open `/jobs/7` (Singh & Sons — LATE) and
+use the stepper / AI message drafts. On the Sales dashboard, see "Repeat Customers Due for
+a Check-in" (Meera Shah / Urban Nest). On the Owner dashboard, read the **Daily Briefing**.
 
-*(Note: You can switch between roles instantly using the Persona Switcher at the top of any page!)*
-
-### Option B — Production Build & Deployment Smoke Tests
-
+### Repopulate the demo database (optional — resets all data)
 ```bash
-# Production build
-npm run build
-
-# Start production server
-PORT=10000 npm start
-
-# In a separate terminal, run deployment & proxy smoke tests
-TEST_BASE_URL=http://127.0.0.1:10000 npm run test:deploy
+rm -f db.sqlite && npm run db:seed
 ```
 
 ---
 
-## 🧭 Recruiter 5-Minute Walkthrough Guide
+## 🧪 How the three brief scenarios were tested
 
-To see the platform's core capabilities in action:
-
-1. **Test the Messy WhatsApp Lead Parser:**
-   - Click the **"AI WhatsApp Intake"** button in the header.
-   - Click **"Preset #1"** (Mixed Hindi/English with gold foil).
-   - Watch the AI instantly extract items, calculate estimated quotes (₹3,800), flag missing folding details, and draft a WhatsApp clarification message.
-   - Click **"Create Enquiry in Pipeline"** to see it immediately appear in the Kanban board.
-
-2. **Experience the Persona Switcher:**
-   - In the top bar, click **"💼 Sales"** → See sales-focused KPIs, unquoted enquiry alerts, and repeat order hub.
-   - Click **"⚙️ Production"** → See print floor priority queue, paper stock alerts, and machine lamination dependencies.
-   - Click **"👑 Owner"** → See executive revenue radar, bottleneck diagnostics, and customer LTV leaderboard.
-
-3. **Test 1-Click "Same as Last Time" Repeat Orders:**
-   - Click **"1-Click Repeat Order"** in the header or on BrightTech's profile (`/customers/1`).
-   - Review past order specs vs draft quote and confirm with 1 click.
-
-4. **Test the Pre-Flight Checklist on Job Detail:**
-   - Open `/jobs/6` (Vihaan Interiors) or `/jobs/7` (Singh & Sons).
-   - Check off pre-flight tasks and observe live progress updates and audit activity log.
-
-5. **Interact with the Shyft Copilot:**
-   - Open the bottom-right **AI Copilot** floating bubble.
-   - Click the prompt chip: *"What is our active pipeline value?"* or *"Draft an apology message for Singh & Sons delay"*.
+| Scenario | How to reproduce | Automated coverage |
+|---|---|---|
+| **1. Repeat customer, same order** | `/customers/1` (Neha Desai / BrightTech) → "1-Click Repeat Order" → review specs vs. past job → confirm. Or Copilot: *"What did Neha from BrightTech order last time?"* | `features.test.mjs` — "Repeat Order Assistant matches past delivered jobs" |
+| **2. Messy new enquiry (typo'd name)** | Header → `AI WhatsApp Intake` → paste *"Hi, Neha from BrghtTech Solutons here. Need our usual 500 glossy cards by Friday"* → engine resolves the typo to the existing account with high confidence → **human chooses** Attach vs. New; a truly new company is flagged as no-match | `features.test.mjs` — "fuzzy-matches a typo'd existing customer", "flags a genuinely new company" |
+| **3. Job going late** | `/jobs/7` is pre-seeded late (due 2 days ago, still PRINTING). It is red on every board, `LATE` on the detail page, `CRITICAL` in the risk engine, counted in the Owner Daily Briefing, and "Draft an apology message for Singh & Sons delay" produces a copy-paste customer update | `features.test.mjs` — "Risk Analysis flags late jobs", "Copilot … communication drafting" |
 
 ---
 
-## 📁 Project Structure
+## 🚫 Explicit scope cuts (naming them is a feature)
 
-```
-src/
-  app/
-    api/
-      ai/parse-lead/        # WhatsApp lead ingestion parser
-      ai/repeat-order/      # 1-click repeat order generator
-      ai/risk-analysis/     # Bottleneck & production risk analyzer
-      ask/                  # Natural language AI Copilot
-      auth/                 # Login, logout, role switcher
-      jobs/create/          # Job creation with lead sources & specs
-      jobs/update-stage/    # Stage progression with audit activity
-      jobs/update-checklist/# Floor pre-flight subtask persistence
-      notes/add/            # Internal notes
-    customers/              # Customer 360 directory & detail
-    dashboard/              # Multi-persona adaptive dashboard
-    jobs/                   # Kanban board with role perspective lenses
-    login/                  # Login portal
-  components/
-    AssistantWidget.tsx     # Context-aware floating AI Copilot
-    JobAiActions.tsx        # WhatsApp update & floor work order generator
-    JobChecklist.tsx        # Interactive pre-flight checklist
-    JobStageStepper.tsx     # Visual lifecycle stage progression
-    MessyLeadModal.tsx      # WhatsApp / Audio text parser modal
-    PipelineBoard.tsx       # Multi-lens interactive Kanban board
-    RepeatOrderModal.tsx    # 1-click repeat order modal
-    RoleSwitcher.tsx        # Top persona switcher & recruiter guide
-  lib/
-    ai-engine.mjs           # Domain NLP parser, risk analysis, & copilot logic
-    auth.ts                 # Cookie session helpers
-    db.mjs                  # SQLite connection & high-performance queries
-    redirect.ts             # Proxy-safe HTTP 303 redirection helper
-  scripts/
-    seed.js                 # Seed database generator
-tests/
-  features.test.mjs         # AI parser, repeat order, & risk engine unit tests
-  render.test.mjs           # Proxy health check & multi-role session smoke tests
-```
+- **No real WhatsApp/SMS/email integration** — message drafts are copy-paste from the UI.
+  A WhatsApp Business webhook for intake is the natural v2.
+- **No payment gateway** — the advance is a number (`paid_upfront`); reconciliation is a note.
+- **No multi-tenant auth / JWT infra** — seeded role login for a 3-person internal tool,
+  plus a Persona Switcher for demoing roles.
+- **No file-storage pipeline for designs** — artwork status is tracked in the checklist and
+  specs text, not uploaded.
+- **No raw text-to-SQL** — the Copilot is a constrained intent router over safe read-only
+  functions (see AI section b).
+- **6 pipeline columns, not 11** — Confirmation, Design-approval, Finishing, QC are tracked
+  as flags/checklist inside the 6 stages; the trade-off is documented in the data model.
+- **Prisma schema kept as documentation** — runtime is `better-sqlite3` with explicit SQL.
 
 ---
 
-*Engineered with domain empathy for commercial print operations — turning fragmented WhatsApp chats and spreadsheet silos into a unified operational command center.*
+## 🔭 What I'd build next with two more weeks
+
+1. A real WhatsApp Business API webhook: inbound messages become draft jobs automatically.
+2. LLM provider behind the existing seam (`ai-engine.mjs` is already four pure functions)
+   with the same human-in-the-loop confirmations — no framework needed.
+3. Vector/fuzzy search across customers and notes (typos, nicknames, "the wedding people").
+4. Smart quote suggestions from similar past jobs, and photo-of-handwritten-order OCR intake.
+5. Real-time multi-device sync (the shop currently shares one laptop + phones).
+
+---
+
+## 🤝 AI tool usage disclosure
+
+This project was built with the Arena.ai Agent Mode assistant under the supervision of the
+candidate. The full collaboration log lives in the session transcript; an organized
+summary — including decisions where AI suggestions were **rejected or changed** — is in
+[`AI_CHAT_HISTORY.md`](AI_CHAT_HISTORY.md). Runtime verification results (freshly
+re-measured, not restated) are in [`VERIFICATION_REPORT.md`](VERIFICATION_REPORT.md).
+
+---
+
+## 📁 Project structure (highlights)
+
+```
+src/lib/pipeline.mjs      # canonical pipeline + per-stage owner model (single source of truth)
+src/lib/ai-engine.mjs     # intake parser (fuzzy matching), risk, repeat orders,
+                          # re-engagement nudges, daily briefing, Copilot intent router
+src/lib/pricing.mjs       # canonical ₹ rate table — the only place money is priced
+src/lib/db.mjs            # SQLite access layer (explicit SQL)
+src/app/                  # dashboard (per-role) · pipeline board · customer 360 · job detail
+src/components/           # PipelineBoard, MessyLeadModal, RepeatOrderModal, AssistantWidget, …
+src/scripts/seed.js       # 3 users · 12 customers · 27 jobs · realistic multi-month history
+tests/features.test.mjs   # 11/11 — engine + data model + the three brief scenarios
+tests/render.test.mjs     # 6/6 — login/session/redirect smoke tests against a live server
+```
+
+*Built with domain empathy for a commercial print shop — turning fragmented WhatsApp chats
+and tribal knowledge into one pipeline where every job has a stage, an owner, and a paper
+trail.*

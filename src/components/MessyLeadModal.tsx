@@ -9,6 +9,7 @@ export default function MessyLeadModal() {
   const [inputText, setInputText] = useState("");
   const [isParsing, setIsParsing] = useState(false);
   const [parsedData, setParsedData] = useState<any>(null);
+  const [attachToExisting, setAttachToExisting] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -40,6 +41,7 @@ export default function MessyLeadModal() {
       const data = await res.json();
       if (data.success) {
         setParsedData(data);
+        setAttachToExisting(Boolean(data.customer?.match));
       }
     } catch (err) {
       console.error(err);
@@ -62,13 +64,16 @@ export default function MessyLeadModal() {
           priority: parsedData.job.priority,
           quoteAmount: parsedData.job.quoteAmount,
           dueDate: parsedData.job.dueDate,
+          customerId: attachToExisting && parsedData.customer.match ? parsedData.customer.match.id : null,
           customerName: parsedData.customer.name,
           company: parsedData.customer.company,
           phone: parsedData.customer.phone,
           email: parsedData.customer.email,
           leadSource: "WhatsApp / AI Ingestion",
           specsSummary: parsedData.job.specsSummary,
-          notes: `Raw input: ${parsedData.rawText}`
+          notes: attachToExisting && parsedData.customer.match
+            ? `Existing account match (${parsedData.customer.match.confidence} confidence, ${parsedData.customer.match.method}). Raw input: ${parsedData.rawText}`
+            : `Raw input: ${parsedData.rawText}`
         })
       });
       const result = await res.json();
@@ -193,6 +198,41 @@ export default function MessyLeadModal() {
                         {parsedData.customer.isNew ? "New Client" : "Existing Account"}
                       </span>
                     </div>
+
+                    {/* Human-in-the-loop confirmation: never auto-link (or auto-create) silently */}
+                    {parsedData.customer.match ? (
+                      <div className="rounded-xl border border-emerald/30 bg-emerald-soft/40 p-3 space-y-2">
+                        <p className="text-[11px] text-brand-700 leading-relaxed">
+                          <strong className="text-emerald">🔗 Matched existing account:</strong>{" "}
+                          {parsedData.customer.match.name}{parsedData.customer.match.company ? ` (${parsedData.customer.match.company})` : ""} —{" "}
+                          {parsedData.customer.match.confidence} confidence ({parsedData.customer.match.method}). No duplicate will be created.
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setAttachToExisting(true)}
+                            className={`flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${
+                              attachToExisting ? "bg-emerald text-white border-emerald" : "bg-white text-brand-600 border-brand-200 hover:bg-brand-100"
+                            }`}
+                          >
+                            ✓ Attach to existing account
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAttachToExisting(false)}
+                            className={`flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${
+                              !attachToExisting ? "bg-amber text-brand-950 border-amber" : "bg-white text-brand-600 border-brand-200 hover:bg-brand-100"
+                            }`}
+                          >
+                            Create new account instead
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-amber-deep bg-amber-soft/50 border border-amber/20 rounded-lg px-2.5 py-1.5">
+                        🆕 No existing account match found — this will be created as a <strong>new customer</strong>. Confirm the details before ingesting.
+                      </p>
+                    )}
 
                     <div className="text-sm">
                       <strong className="text-ink-900 font-bold block">{parsedData.customer.name}</strong>
