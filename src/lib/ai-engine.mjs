@@ -84,6 +84,164 @@ function findBestCustomerMatch(rawText, customers) {
   return { customer: top.customer, confidence: top.best >= 0.78 ? "high" : "medium" };
 }
 
+// --- Quantity extraction ---------------------------------------------------
+//
+// The old regexes only accepted a number glued directly to the keyword
+// ("500 cards"). Real WhatsApp messages put words in between — "100 corporate
+// brochures", "2 flex banners" — and then silently fell back to a hard-coded
+// default, which is how a 2-banner job became a 10-banner quote. The intake
+// eval in tests/eval-intake.mjs caught exactly that.
+//
+// This scans a short window *before* the keyword for a quantity token, skipping
+// adjectives, and deliberately ignores tokens that are specs rather than
+// counts: "300gsm" (paper), "6x3" (dimensions), "a4" (size).
+
+const NUMBER_WORDS = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20,
+  "twenty five": 25, twentyfive: 25, thirty: 30, forty: 40, fifty: 50,
+  sixty: 60, "seventy five": 75, eighty: 80, ninety: 90, hundred: 100,
+  "two hundred": 200, "three hundred": 300, "five hundred": 500,
+  "one thousand": 1000, thousand: 1000, "two thousand": 2000,
+};
+
+/** Words that can sit between a quantity and its item keyword. */
+const QUANTITY_SKIP_WORDS = new Set([
+  "flex", "vinyl", "corporate", "premium", "glossy", "gloss", "matte",
+  "visiting", "business", "invite", "invitation", "wedding", "menu",
+  "thank", "you", "new", "extra", "custom", "printed", "printing",
+  "laminated", "foil", "same", "usual", "approx", "about", "around",
+  "of", "the", "our", "some", "and", "plus", "with", "only", "total",
+]);
+
+const MAX_PLAUSIBLE_QTY = 100000;
+
+/**
+ * Business-name vocabulary. The original list only covered the suffixes that
+ * happened to appear in the seed data, so a new client called "Blue Orchid
+ * Weddings" was silently filed as "Independent / Individual" instead of the
+ * company the client actually typed. Widened to the long tail of small-business
+ * suffixes a print shop actually sees.
+ */
+const COMPANY_SUFFIX_RE = new RegExp(
+  "\\b(?:" +
+  [
+    "pvt", "ltd", "llp", "corp", "inc", "co", "company", "solutions", "media",
+    "tech", "technologies", "interiors", "events", "studio", "studios",
+    "hotels", "fitness", "traders", "trading", "designs", "prints", "printing",
+    "press", "weddings", "wedding", "bakery", "cafe", "caf", "restaurant",
+    "caterers", "catering", "enterprises", "industries", "associates",
+    "group", "works", "hub", "labs", "lab", "academy", "clinic", "salon",
+    "boutique", "mart", "exports", "decor", "films", "productions",
+    "advertising", "marketing", "foods", "jewellers", "jewelry", "textiles",
+    "garments", "motors", "builders", "developers", "hospital", "school",
+    "schools", "college", "properties", "realty", "pharma", "logistics",
+    "agencies", "agency", "consultants", "services", "systems", "infra",
+  ].join("|") +
+  ")\\b",
+  "i"
+);
+
+/** Words that end a business name but are not part of it. */
+const NAME_TRAILING_STOPWORDS = new Set([
+  "and", "or", "the", "of", "for", "with", "please", "here", "need", "want",
+  "urgent", "urgently", "thanks", "regards", "by", "from", "is", "at", "to",
+  "in", "on", "our", "my", "we", "hi", "hello", "bhaiya", "sir", "mam",
+  "plz", "pls", "kindly", "also", "plus", "only", "just",
+]);
+
+/**
+ * Clean up a captured business name. The widened capture (needed for
+ * "Blue Orchid Weddings") also swallows whatever follows — "Nexus Media and",
+ * "Zingaro Studios cafe launch" — so drop trailing filler and cut the name off
+ * right after its business suffix.
+ */
+function normalizeBusinessName(value) {
+  let words = String(value).trim().split(/\s+/).filter(Boolean);
+  while (words.length > 1 && NAME_TRAILING_STOPWORDS.has(words[words.length - 1].toLowerCase())) {
+    words.pop();
+  }
+  // The capture patterns are case-insensitive, so "for our launch" matches the
+  // "for <Name>" rule and a phrase becomes a person. Drop leading filler too.
+  while (words.length > 0 && NAME_TRAILING_STOPWORDS.has(words[0].toLowerCase())) {
+    words.shift();
+  }
+  // Cut at the FIRST business suffix — but let a legal-form token extend it,
+  // since "City Events Pvt Ltd" legitimately trails "Pvt Ltd" while
+  // "Zingaro Studios cafe launch" trails an event description, not a name.
+  const LEGAL_FORM = new Set(["pvt", "ltd", "llp", "corp", "inc", "co", "company"]);
+  const suffixAt = words.findIndex((w) => COMPANY_SUFFIX_RE.test(w));
+  if (suffixAt >= 0) {
+    let end = suffixAt;
+    while (end + 1 < words.length && LEGAL_FORM.has(words[end + 1].toLowerCase())) end++;
+    words = words.slice(0, end + 1);
+  }
+  return words.join(" ");
+}
+
+/**
+ * Find the quantity for the first keyword hit in `lowerText`.
+ * @returns {{ quantity: number, explicit: boolean }} — `explicit` is false when
+ * no number was found and the caller's default is being used.
+ */
+function extractQuantity(lowerText, keywords, defaultQuantity) {
+  for (const keyword of keywords) {
+    const at = lowerText.search(keyword);
+    if (at < 0) continue;
+
+    // Only look inside the same clause: stop at sentence punctuation.
+    const window = lowerText
+      .slice(0, at)
+      .split(/[.;:!?]|\n/)
+      .pop();
+    const tokens = window.trim().split(/\s+/).filter(Boolean).slice(-6);
+
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      const token = tokens[i].replace(/[^a-z0-9]/g, "");
+      if (!token) continue;
+
+      if (QUANTITY_SKIP_WORDS.has(token)) continue;
+
+      // Spec tokens, not counts: "300gsm", "6x3", "a4", "350gsm".
+      if (/^\d+(gsm|gm|x|ft|mm|cm|kg|inch)$/.test(tokens[i].replace(/[^a-z0-9]/g, "")) ||
+          /^[a-z]\d+$/.test(token)) continue;
+      if (/[a-z]/.test(token) && !NUMBER_WORDS[token]) continue;
+
+      const value = /^\d+$/.test(token) ? parseInt(token, 10) : NUMBER_WORDS[token];
+      if (value && value > 0 && value <= MAX_PLAUSIBLE_QTY) {
+        return { quantity: value, explicit: true };
+      }
+      // Two-word numbers ("five hundred") span the previous token.
+      const pair = `${tokens[i - 1] || ""} ${tokens[i]}`.replace(/[^a-z ]/g, "").trim();
+      if (NUMBER_WORDS[pair]) return { quantity: NUMBER_WORDS[pair], explicit: true };
+    }
+
+    // People also put the count *after* the item — "brochures again, 1000
+    // pieces". Scan forward within the same clause, skipping filler, and never
+    // treat a measurement as a count ("by 5 pm", "3 days", "6 ft").
+    const after = lowerText
+      .slice(at)
+      .split(/[.;:!?\n]/)[0]
+      .trim()
+      .split(/\s+/)
+      .slice(1, 6);
+    const UNIT_AFTER = new Set(["pm", "am", "day", "days", "hour", "hours", "week", "weeks", "month", "months", "ft", "inch", "inches", "gsm", "kg"]);
+    for (let i = 0; i < after.length; i++) {
+      const raw = after[i];
+      const token = raw.replace(/[^a-z0-9]/g, "");
+      if (!token) continue;
+      if (QUANTITY_SKIP_WORDS.has(token) || token === "again" || token === "need") continue;
+      if (/^\d+(gsm|gm|x|ft|mm|cm|kg|inch)$/.test(token) || /^[a-z]\d+$/.test(token)) continue;
+      if (UNIT_AFTER.has((after[i + 1] || "").replace(/[^a-z]/g, ""))) continue;
+      const value = /^\d+$/.test(token) ? parseInt(token, 10) : NUMBER_WORDS[token];
+      if (value && value > 0 && value <= MAX_PLAUSIBLE_QTY) {
+        return { quantity: value, explicit: true };
+      }
+    }
+  }
+  return { quantity: defaultQuantity, explicit: false };
+}
+
 /**
  * Parses unstructured/messy lead text (WhatsApp messages, voice note transcripts, rough emails).
  * Extracts structured customer info, print line items, paper specs, urgency, estimated quote, and missing details.
@@ -120,17 +278,21 @@ export function parseMessyLead(rawText) {
   // Name / Company heuristics — light extraction for an explicit mention
   // (keywords are word-bounded so "Zingaro Studios" never triggers the
   // "studio:" rule and swallows the rest of the sentence)
+  // Up to 4 capitalised words, so multi-word business names survive the capture
+  // ("Blue Orchid Weddings", "City Events Pvt Ltd") instead of being truncated
+  // to two words and then failing the company-suffix test.
   const namePatterns = [
-    /(?:from|myself|i am|this is|naam|name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
+    /(?:from|myself|i am|this is|naam|name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/i,
     /\b(?:company|firm|agency|studio|enterprise|pvt ltd|ltd|brand|team)\b\s*(?:is|:|-)?\s*([A-Za-z0-9\s&]+?)(?=(?:,|\.|\n|phone|urgent|need|want|chahiye|$))/i,
-    /(?:for|regards|by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
+    /(?:for|regards|by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/i,
   ];
 
   for (const pattern of namePatterns) {
     const m = text.match(pattern);
     if (m && m[1]) {
-      const val = m[1].trim();
-      if (!detectedCompany && /(?:pvt|ltd|solutions|media|tech|interiors|events|corp|inc|studio|hotels|fitness|traders|designs)/i.test(val)) {
+      const val = normalizeBusinessName(m[1].trim());
+      if (!val) continue;
+      if (!detectedCompany && COMPANY_SUFFIX_RE.test(val)) {
         detectedCompany = val;
       } else if (detectedName === "Unknown Lead") {
         detectedName = val;
@@ -188,16 +350,15 @@ export function parseMessyLead(rawText) {
   // 2. Extract Items & Quantities
   const items = [];
   let estimatedTotal = 0;
+  /** Line items whose quantity was defaulted rather than read from the message. */
+  const missingQuantity = [];
 
   // Visiting cards
-  const cardMatch = lower.match(/(\d+[\d,]*|\b(?:five hundred|one thousand|two thousand|hundred|500|1000|2000)\b)?\s*(?:visiting\s*cards?|cards?|business\s*cards?)/i);
-  if (cardMatch || /card/i.test(lower)) {
-    let qty = 500;
-    const num = cardMatch && cardMatch[1] ? cardMatch[1].replace(/,/g, "") : null;
-    if (num && !isNaN(parseInt(num, 10))) qty = parseInt(num, 10);
-    else if (/1000|thousand|1k/i.test(lower)) qty = 1000;
-    else if (/200|two hundred/i.test(lower)) qty = 200;
-    else if (/300|three hundred/i.test(lower)) qty = 300;
+  const cardsFound = /card/i.test(lower);
+  if (cardsFound) {
+    const found = extractQuantity(lower, [/\b(?:visiting\s+cards?|business\s+cards?|cards?)\b/i], 500);
+    const qty = found.quantity;
+    if (!found.explicit) missingQuantity.push("Visiting Cards");
 
     let paper = "300gsm Art Card";
     if (/350\s*gsm/i.test(lower)) paper = "350gsm Premium";
@@ -219,15 +380,10 @@ export function parseMessyLead(rawText) {
   }
 
   // Brochures
-  const brochureMatch = lower.match(/(\d+[\d,]*|\b(?:fifty|hundred|50|100|200|500|1000|2000)\b)?\s*(?:brochures?|pamphlets?|flyers?|leaflets?)/i);
-  if (brochureMatch || /brochure/i.test(lower)) {
-    let qty = 100;
-    const num = brochureMatch && brochureMatch[1] ? brochureMatch[1].replace(/,/g, "") : null;
-    if (num && !isNaN(parseInt(num, 10))) qty = parseInt(num, 10);
-    else if (/50\b|fifty/i.test(lower)) qty = 50;
-    else if (/2000|2k/i.test(lower)) qty = 2000;
-    else if (/500/i.test(lower) && items.some(it => it.type === "Visiting Cards")) qty = 50; // if cards took 500
-    else if (/500/i.test(lower)) qty = 500;
+  if (/brochure|pamphlet|flyer|leaflet/i.test(lower)) {
+    const found = extractQuantity(lower, [/\b(?:brochures?|pamphlets?|flyers?|leaflets?)\b/i], 100);
+    const qty = found.quantity;
+    if (!found.explicit) missingQuantity.push("Brochures");
 
     let fold = "A4 Tri-fold";
     if (/bi-fold|half\s*fold|2\s*fold/i.test(lower)) fold = "A4 Bi-fold";
@@ -246,9 +402,13 @@ export function parseMessyLead(rawText) {
 
   // Posters / Banners
   if (/poster|banner|standee|large\s*format/i.test(lower)) {
-    let qty = 10;
-    const pMatch = lower.match(/(\d+)\s*(?:posters?|banners?|standees?)/i);
-    if (pMatch) qty = parseInt(pMatch[1], 10);
+    const found = extractQuantity(
+      lower,
+      [/\b(?:posters?|banners?|standees?)\b/i, /\blarge\s*format\b/i],
+      10
+    );
+    const qty = found.quantity;
+    if (!found.explicit) missingQuantity.push("Posters / Display");
 
     let size = "A1 Large Format";
     if (/a2/i.test(lower)) size = "A2 Poster";
@@ -290,6 +450,9 @@ export function parseMessyLead(rawText) {
 
   // 4. Missing Information Warnings
   const missingInfo = [];
+  if (missingQuantity.length > 0) {
+    missingInfo.push(`Quantity not stated for ${missingQuantity.join(", ")} — using a default, confirm with the client`);
+  }
   if (!detectedPhone && !detectedEmail) missingInfo.push("No contact phone number or email provided");
   if (!items.some(i => i.paper && !i.paper.includes("To be confirmed"))) missingInfo.push("Paper GSM / stock preference unspecified");
   if (items.some(i => i.type === "Brochures") && !/tri-fold|bi-fold|a4|a5|catalog/i.test(lower)) missingInfo.push("Brochure format/folding style unclear");

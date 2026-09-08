@@ -5,8 +5,15 @@ spreadsheets for a 3-person print shop — every job has a stage, exactly one ow
 paper trail.*
 
 **Assignment:** AI Engineer Intern · **Candidate:** Vanshi (simulated submission) ·
-**Date:** 8 Sep 2026 · **Status:** Complete — 11/11 feature tests, 6/6 deploy smoke tests,
-19/19 routes build.
+**Date:** 8 Sep 2026
+
+![CI](https://github.com/vanshipuri/Shyft-Studio/actions/workflows/ci.yml/badge.svg)
+![tests](https://img.shields.io/badge/tests-19%2F19%20passing-brightgreen)
+![eval](https://img.shields.io/badge/intake__eval-62%2F62%20assertions-brightgreen)
+![audit](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)
+
+**Status:** Complete — 19/19 tests (engine, data model, LLM seam), 62/62 intake-eval
+assertions, 6/6 deploy smoke tests, 19 routes building clean on Next.js 16.
 
 > What Samyak's team actually said, and the system requirement each quote becomes:
 
@@ -94,20 +101,37 @@ for the demo. This is a documented scope cut, not an oversight.
 
 | Layer | Choice | Why |
 |---|---|---|
-| Frontend | Next.js 14 (App Router) + Tailwind | Server components render data instantly; small client "islands" for modals/board; single deployable |
+| Frontend | Next.js 16 (App Router, Turbopack) + Tailwind | Server components render data instantly; small client "islands" for modals/board; single deployable |
 | Backend | Next.js API routes (form POSTs + JSON) | One unit to run; 303 proxy-safe redirects for deploy previews |
 | Database | SQLite via `better-sqlite3` | File-backed, zero-ops, relational integrity with FKs; committed demo seed |
 | ORM | none at runtime (Prisma schema kept for reference only) | `db.mjs` is explicit SQL — easy to read, no magic |
-| AI | Deterministic domain engine (`ai-engine.mjs`) with a **clean provider seam** | See below |
+| AI | Deterministic domain engine (`ai-engine.mjs`) + a **real, tested provider seam** (`llm-provider.mjs`) | See below |
+| AI quality | Hand-labelled extraction eval with a hard CI gate (`tests/eval-intake.mjs`) | Catches silent regex rot |
+| CI | GitHub Actions: build + tests + eval + live-server smoke + `npm audit` | Green before merge, not after |
 | Auth | Cookie session + seeded role accounts | 3-person internal tool |
 
 **Why not LangChain / a vector DB / microservices / Postgres-in-the-cloud?** Because the
 scope is a 3-person print shop and a 3-day build. A deterministic domain engine is faster
 to reason about, debuggable offline, and free to run; its four pure functions
 (`parseMessyLead`, `generateRepeatOrderPackage`, `analyzeProductionRisks`,
-`processCopilotQuery`) are exactly the seam a hosted LLM provider would sit behind — no
-framework needed to swap later. No provider API key is configured, so nothing here calls
-out to the network; this is stated plainly rather than dressed up.
+`processCopilotQuery`) are exactly the seam a hosted LLM provider sits behind — no
+framework needed to swap later.
+
+**And the seam is real, not aspirational.** `src/lib/llm-provider.mjs` implements it:
+set `SHYFT_LLM_API_KEY` and intake enrichment runs through any OpenAI-compatible endpoint
+(OpenAI, Groq, Together, vLLM, Ollama). Leave it unset — the default, and what CI runs —
+and `createLlmClient()` returns `available: false`, the app makes **zero** network calls,
+and behaviour is identical to the pure-rules engine. Three invariants are enforced in code
+and pinned by tests, not just asserted in prose:
+
+| Invariant | Where it is enforced | Test |
+|---|---|---|
+| The LLM may fill blank fields, never set prices | `enrichLeadWithLLM` restores `quoteAmount`/`items` from the deterministic result | `the provider can never change the price or the line items` |
+| Identity resolution stays local | provider `company` is ignored when an account already matched | `an already-matched existing account is never re-identified` |
+| A flaky provider must not take intake down | provider throw/timeout → return the deterministic result | `provider failure degrades to the deterministic result` |
+
+Provider output is validated before use (`provider output is validated, not trusted`):
+non-string fields, malformed phone/email and oversized strings are dropped.
 
 ---
 
@@ -181,11 +205,16 @@ knowing where things stand — collapsed into one screen.
 
 ```bash
 npm ci --include=dev
-npm run build        # 19/19 routes compile
+npm run build        # 19 routes compile clean (Next.js 16 / Turbopack)
 npm start            # http://localhost:3000 (or: npm run dev)
-npm test             # 11/11 feature tests (engine + data-model)
+npm test             # 19/19 — engine + data model + LLM provider seam
+npm run eval         # 62/62 intake-extraction assertions (exits 1 on regression)
 npm run test:deploy  # 6/6 — requires the server running (TEST_BASE_URL override supported)
 ```
+
+Optional: `cp .env.example .env` — every variable is optional. Setting
+`SHYFT_LLM_API_KEY` switches intake enrichment from the rules engine to a live
+OpenAI-compatible provider; unset, the app never touches the network.
 
 **Demo credentials (all password `password123`):** `samyak@shyft.studio` (Owner) ·
 `abhishek@shyft.studio` (Sales) · `siddhant@shyft.studio` (Production).
@@ -214,6 +243,48 @@ rm -f db.sqlite && npm run db:seed
 
 ---
 
+## 📏 The intake eval — how extraction quality is measured, not asserted
+
+A rules-based extraction engine rots silently: someone tweaks a regex, one product family
+starts mis-quoting, and nothing fails because the unit tests only cover the happy demo
+string. `tests/eval-intake.mjs` is the guard rail, and it is **scored**, not a test that
+asserts the engine does whatever the engine currently does.
+
+16 messy messages (Hinglish, typos, no-quantity, multi-line-item, brand-new companies)
+each carry **hand-labelled ground truth** — what a human in the shop would read out of
+them — written before looking at engine output. 62 field assertions are scored per axis:
+
+```
+  Customer identity    ████████████████████ 16/16  100%
+  Company name         ████████████████████ 3/3   100%
+  Quantities           ████████████████████ 16/16  100%
+  Line-item count      ████████████████████ 16/16  100%
+  Priority             ████████████████████ 8/8   100%
+  Contact details      ████████████████████ 3/3   100%
+  OVERALL                                    62/62
+```
+
+Identity, quantities and line-item count must hold **100%** — those directly become a
+customer record or a price. An overall percentage alone would be too forgiving: one
+mis-read quantity is 98.4%, which sails past a 95% bar while still quoting a client the
+wrong number.
+
+**The gate is verified to have teeth.** Disabling the forward-quantity scan makes
+`npm run eval` exit 1 with `Extraction quality regressed: Quantities 15/16, overall 98.4%`.
+The eval found three real defects that shipped in the first version, all now fixed:
+
+| Defect the eval caught | Before | After |
+|---|---|---|
+| Number separated from keyword by an adjective — *"100 corporate brochures"* | 50 brochures | 100 |
+| Same, for large format — *"2 flex banners 6x3"* | 10 banners | 2 |
+| Quantity stated *after* the item — *"brochures again, 1000 pieces"* | 100 | 1000 |
+| Business suffixes outside the seed vocabulary — *"Blue Orchid Weddings"* | "Independent / Individual" | "Blue Orchid Weddings" |
+
+A defaulted quantity is also surfaced to the user (`Quantity not stated for Visiting
+Cards — using a default, confirm with the client`) rather than being quoted silently.
+
+---
+
 ## 🚫 Explicit scope cuts (naming them is a feature)
 
 - **No real WhatsApp/SMS/email integration** — message drafts are copy-paste from the UI.
@@ -228,6 +299,10 @@ rm -f db.sqlite && npm run db:seed
 - **6 pipeline columns, not 11** — Confirmation, Design-approval, Finishing, QC are tracked
   as flags/checklist inside the 6 stages; the trade-off is documented in the data model.
 - **Prisma schema kept as documentation** — runtime is `better-sqlite3` with explicit SQL.
+- **No live LLM key in this repo** — the provider seam in `src/lib/llm-provider.mjs` is
+  implemented, tested with a mock provider, and wired into `/api/ai/parse-lead`, but ships
+  unconfigured. Set `SHYFT_LLM_API_KEY` to use it; unset, the deterministic engine does all
+  the work and nothing calls the network. No key is committed, deliberately.
 
 ---
 
@@ -256,15 +331,19 @@ re-measured, not restated) are in [`VERIFICATION_REPORT.md`](VERIFICATION_REPORT
 
 ```
 src/lib/pipeline.mjs      # canonical pipeline + per-stage owner model (single source of truth)
-src/lib/ai-engine.mjs     # intake parser (fuzzy matching), risk, repeat orders,
-                          # re-engagement nudges, daily briefing, Copilot intent router
+src/lib/ai-engine.mjs     # intake parser (fuzzy matching + scored extraction), risk, repeat
+                          # orders, re-engagement nudges, daily briefing, Copilot intent router
+src/lib/llm-provider.mjs  # the provider seam: offline by default, fills gaps, never sets prices
 src/lib/pricing.mjs       # canonical ₹ rate table — the only place money is priced
 src/lib/db.mjs            # SQLite access layer (explicit SQL)
 src/app/                  # dashboard (per-role) · pipeline board · customer 360 · job detail
 src/components/           # PipelineBoard, MessyLeadModal, RepeatOrderModal, AssistantWidget, …
-src/scripts/seed.js       # 3 users · 12 customers · 27 jobs · realistic multi-month history
-tests/features.test.mjs   # 11/11 — engine + data model + the three brief scenarios
-tests/render.test.mjs     # 6/6 — login/session/redirect smoke tests against a live server
+src/scripts/seed.js       # 3 users · 12 customers · 27 jobs · idempotent, DB_PATH-aware
+tests/features.test.mjs   # 11 tests — engine + data model + the three brief scenarios
+tests/llm-seam.test.mjs   # 8 tests — provider seam invariants (mocked, no network)
+tests/eval-intake.mjs     # 62 hand-labelled assertions with a hard regression gate
+tests/render.test.mjs     # 6 tests — login/session/redirect smoke against a live server
+.github/workflows/ci.yml  # build + tests + eval + smoke + npm audit on every push/PR
 ```
 
 *Built with domain empathy for a commercial print shop — turning fragmented WhatsApp chats

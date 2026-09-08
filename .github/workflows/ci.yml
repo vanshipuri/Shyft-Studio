@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Build, test & smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Tests must never touch the committed demo database.
+      DB_PATH: /tmp/shyft-ci.sqlite
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install (incl. native better-sqlite3)
+        run: npm ci --include=dev
+
+      - name: Seed a throwaway database
+        run: npm run db:seed
+
+      - name: Typecheck + production build
+        run: npm run build
+
+      - name: Feature & AI-engine tests
+        run: npm test
+
+      - name: Intake-parser evaluation (regression gate)
+        run: npm run eval
+
+      - name: Start production server
+        run: |
+          npm start &
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3000/login; then
+              echo "server up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "server failed to start" >&2; exit 1
+
+      - name: Deploy / proxy smoke tests
+        run: TEST_BASE_URL=http://127.0.0.1:3000 npm run test:deploy
+
+      - name: No known vulnerabilities
+        run: npm audit --audit-level=high

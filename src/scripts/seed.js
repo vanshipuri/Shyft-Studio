@@ -1,7 +1,9 @@
 // Shyft Studio seed — 3 users, 12 customers, ~27 jobs with multi-month order history.
 //
-// Run against a FRESH database only (delete db.sqlite first):
-//   rm -f db.sqlite && npm run db:seed
+// Seeding is destructive by design: it wipes and rebuilds the demo data so it can
+// never append duplicates into an existing database.
+//   npm run db:seed            # resets the demo database (default ./db.sqlite)
+//   DB_PATH=/tmp/x.sqlite npm run db:seed
 //
 // Dates are generated relative to "now" so the demo stays coherent whenever it is
 // re-seeded: a handful of jobs are intentionally late / at-risk, several customers
@@ -11,7 +13,7 @@
 const Database = require("better-sqlite3");
 const path = require("path");
 
-const db = new Database(path.join(process.cwd(), "db.sqlite"));
+const db = new Database(process.env.DB_PATH || path.join(process.cwd(), "db.sqlite"));
 db.exec(`PRAGMA foreign_keys = ON;`);
 
 const DAY = 86400000;
@@ -21,6 +23,18 @@ function daysFromNow(n, hour = 9) {
   d.setUTCHours(hour, 0, 0, 0);
   return d.toISOString();
 }
+
+// Reset first. The old script only guarded `users`, so re-running it silently
+// appended a second copy of every customer and job (and render.yaml had to warn
+// about it). Wiping makes `npm run db:seed` idempotent and safe to automate.
+db.exec(`
+DROP TRIGGER IF EXISTS trg_jobs_updated_at;
+DROP TABLE IF EXISTS activities;
+DROP TABLE IF EXISTS notes;
+DROP TABLE IF EXISTS jobs;
+DROP TABLE IF EXISTS customers;
+DROP TABLE IF EXISTS users;
+`);
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -103,13 +117,10 @@ function getUser(email) {
   return db.prepare("SELECT * FROM users WHERE email = ?").get(email);
 }
 
-const existingUsers = db.prepare("SELECT * FROM users").all();
-if (existingUsers.length === 0) {
-  const insertUser = db.prepare("INSERT INTO users (name, email, role, password) VALUES (?, ?, ?, ?)");
-  insertUser.run("Samyak Mehta", "samyak@shyft.studio", "OWNER", "password123");
-  insertUser.run("Abhishek Rao", "abhishek@shyft.studio", "SALES", "password123");
-  insertUser.run("Siddhant Yadav", "siddhant@shyft.studio", "PRODUCTION", "password123");
-}
+const insertUser = db.prepare("INSERT INTO users (name, email, role, password) VALUES (?, ?, ?, ?)");
+insertUser.run("Samyak Mehta", "samyak@shyft.studio", "OWNER", "password123");
+insertUser.run("Abhishek Rao", "abhishek@shyft.studio", "SALES", "password123");
+insertUser.run("Siddhant Yadav", "siddhant@shyft.studio", "PRODUCTION", "password123");
 
 const samyak = getUser("samyak@shyft.studio");
 const abhishek = getUser("abhishek@shyft.studio");

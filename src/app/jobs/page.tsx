@@ -8,8 +8,8 @@ import MessyLeadModal from "@/components/MessyLeadModal";
 import RepeatOrderModal from "@/components/RepeatOrderModal";
 import AssistantWidget from "@/components/AssistantWidget";
 
-export default function JobsPage() {
-  const c = cookies();
+export default async function JobsPage() {
+  const c = await cookies();
   const session = c.get("shyft_session")?.value;
   if (!session) redirect("/login");
   const user = getUserByEmail(session);

@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     return redirectAfterPost("/jobs/" + (jobId || ""));
   }
 
-  const c = cookies();
+  const c = await cookies();
   const session = c.get("shyft_session")?.value;
   const user = session ? getUserByEmail(session) : null;
 

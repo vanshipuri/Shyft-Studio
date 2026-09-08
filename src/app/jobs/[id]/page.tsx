@@ -18,14 +18,15 @@ import JobAiActions from "@/components/JobAiActions";
 import AssistantWidget from "@/components/AssistantWidget";
 import MessyLeadModal from "@/components/MessyLeadModal";
 
-export default async function JobDetailPage({ params }: { params: { id: string } }) {
-  const c = cookies();
+export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const c = await cookies();
   const session = c.get("shyft_session")?.value;
   if (!session) redirect("/login");
   const user = getUserByEmail(session);
   if (!user) redirect("/login");
 
-  const jobId = parseInt(params.id, 10);
+  const jobId = parseInt(id, 10);
   const job = getJobById(jobId);
   if (!job) redirect("/jobs");
 

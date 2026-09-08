@@ -1,11 +1,17 @@
-# Demo deployment: SQLite edits are ephemeral on Render's free plan.
-# See README.md for setup and persistence limitations.
+# Demo deployment blueprint: https://render.com/docs/blueprint-spec
+# `render deploy` from the repo root, or import this file as a Blueprint.
+#
+# SQLite edits are ephemeral on Render's free plan (the disk is wiped on every
+# deploy/restart). The committed db.sqlite is the demo dataset, so a fresh
+# deploy always boots with a coherent shop — see README.md "Run, Test & Explore".
 services:
   - type: web
     name: shyft-studio
     runtime: node
     plan: free
-    branch: arena/01a080c2-shyft-studio
+    # Deploy the integration branch. This used to point at a short-lived
+    # feature branch, which silently froze the live demo behind main.
+    branch: main
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /login
@@ -14,6 +20,10 @@ services:
         value: production
       - key: NODE_VERSION
         value: "22"
+      # Optional: set these in the Render dashboard to switch the intake parser
+      # from the deterministic engine to a live LLM. Safe to leave unset.
+      - key: SHYFT_LLM_API_KEY
+        sync: false
     # Next.js reads Render's PORT automatically (3000 locally if unset).
-    # The committed db.sqlite includes demo users, customers, and jobs.
-    # Do not run the seed script on each deploy: it appends duplicate records.
+    # Do NOT add `npm run db:seed` to buildCommand: seeding is destructive and
+    # would wipe any data created through the UI.
