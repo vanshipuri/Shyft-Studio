@@ -38,6 +38,7 @@ module.exports = {
           950: "#451a03",
         },
         "amber-soft": "#fffbeb",
+        "amber-deep": "#92400e",
       },
       fontFamily: { sans: ["ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"] },
     },
