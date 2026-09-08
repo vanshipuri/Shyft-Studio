@@ -109,9 +109,9 @@ export default function MessyLeadModal() {
             parseLead(samples[0].text);
           }
         }}
-        className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white px-3.5 py-2 text-xs font-bold shadow-md shadow-amber-900/10 transition hover:-translate-y-0.5"
+        className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-brand-950 px-3.5 py-2 text-xs font-bold shadow-md shadow-amber-900/20 ring-1 ring-amber-700/30 transition hover:-translate-y-0.5"
       >
-        <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+        <span className="w-2 h-2 rounded-full bg-brand-950/70 animate-pulse" />
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <span>AI WhatsApp Intake</span>
       </button>

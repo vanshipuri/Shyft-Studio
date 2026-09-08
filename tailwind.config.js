@@ -20,7 +20,23 @@ module.exports = {
         "rose-soft": "#fff1f2",
         emerald: "#059669",
         "emerald-soft": "#ecfdf5",
-        amber: "#d97706",
+        // NOTE: keep the full numeric scale here. Defining `amber` as a bare
+        // string wipes out Tailwind's default amber palette, which silently
+        // kills classes like `from-amber-600` / `shadow-amber-900`.
+        amber: {
+          DEFAULT: "#d97706",
+          50: "#fffbeb",
+          100: "#fef3c7",
+          200: "#fde68a",
+          300: "#fcd34d",
+          400: "#fbbf24",
+          500: "#f59e0b",
+          600: "#d97706",
+          700: "#b45309",
+          800: "#92400e",
+          900: "#78350f",
+          950: "#451a03",
+        },
         "amber-soft": "#fffbeb",
       },
       fontFamily: { sans: ["ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"] },
