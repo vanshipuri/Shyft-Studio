@@ -1,0 +1,19 @@
+# Demo deployment: SQLite edits are ephemeral on Render's free plan.
+# See README.md for setup and persistence limitations.
+services:
+  - type: web
+    name: shyft-studio
+    runtime: node
+    plan: free
+    branch: arena/01a07f3e-shyft-studio
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+    # Next.js reads Render's PORT automatically (3000 locally if unset).
+    # The committed db.sqlite includes demo users, customers, and jobs.
+    # Do not run the seed script on each deploy: it appends duplicate records.

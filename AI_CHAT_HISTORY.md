@@ -1,7 +1,8 @@
 # AI Chat History — Shyft Studio Assignment
 
 **Session:** Arena Agent Mode (branch `arena/01a07d40-shyft-studio`)  
-**AI used:** Arena's Agent Mode (Claude-class model, per system instructions)  
+**AI used:** Arena.ai Agent Mode
+
 **Date:** 7 Sep 2026
 
 ---
@@ -104,6 +105,33 @@
 - No real LLM backend (ready to plug in)
 - Simple cookie auth (appropriate for 3 users, not enterprise)
 - SQLite (should become PostgreSQL for production)
+
+---
+
+## 8. Render deployment follow-up — 8 Sep 2026
+
+**Session:** Arena.ai Agent Mode, branch `arena/01a07f3e-shyft-studio`.
+
+**User request:** Edit the proposed “Option B — Deploy to Render” instructions, which included adding `render.yaml`, building on Render instead of Windows, and publishing the changes. The supplied example referred to `main`; this session is fixed to the branch above.
+
+**Changes and judgments:**
+- Inspected the actual package scripts, database, seed script, and Next.js routes rather than copying a generic Node deployment example.
+- Added a free Node-runtime Render Blueprint using Node 22, a lockfile-based install with build dependencies included, `npm start`, and a `/login` health check.
+- Made startup bind to `0.0.0.0` and honor `PORT`; corrected `db:seed` to point to the existing JavaScript file.
+- Kept the committed demo database unchanged. Did not seed on every deploy because the existing seeder appends customers/jobs. Documented free-plan data loss instead of silently provisioning paid storage or claiming persistence.
+- A production proxy check found login redirecting to `https://0.0.0.0:10000/dashboard` and logout redirecting to `http://localhost/login`. Replaced form redirects with root-relative HTTP 303 responses for login, logout, stage updates, and notes.
+- Added read-only deployment smoke tests and updated the README with Blueprint/manual setup, the correct branch, real-URL verification, and security/storage caveats.
+
+**Verification performed in this session:**
+- The first `npm ci --include=dev` attempt could not download Node headers because of a sandbox TLS/network error. Retried with the already-installed headers via the command-local `npm_config_nodedir=/usr/local` setting; no TLS checks were disabled and this workaround was not added to the Render configuration.
+- A clean production install and `npm run build` passed on Linux with Node 22.22.3.
+- `PORT=10000 npm start` listened on `0.0.0.0:10000` and served the app. The preview uses an ignored copy of the seed database, not the committed file.
+- `TEST_BASE_URL=http://127.0.0.1:10000 npm run test:deploy`: all 6 tests passed, including all 3 demo logins/dashboard access and redirects with proxy headers. The tests did not modify the copied database.
+- `npm audit` reported existing findings: 1 critical and 1 high (Next.js and its nested PostCSS dependency). These were documented, not silently dismissed or treated as fixed. A dependency upgrade and authentication/API hardening remain separate work.
+
+**Deployment boundary:** Local production verification is not a live Render deployment. No Render service, paid resource, or hosted submission URL was created in this session; deployment requires selecting the published branch in the user's Render account.
+
+This follow-up is a summary of the actual conversation and tool work, not a verbatim transcript. The earlier sections retain the prior session's process notes.
 
 ---
 

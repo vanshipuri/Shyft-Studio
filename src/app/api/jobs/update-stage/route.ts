@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { redirectAfterPost } from "@/lib/redirect";
 import { db, addActivity, updateJob } from "@/lib/db.mjs";
 import { cookies } from "next/headers";
 import { getUserByEmail } from "@/lib/db.mjs";
@@ -7,7 +8,7 @@ export async function POST(req: NextRequest) {
   const form = await req.formData();
   const jobId = parseInt(String(form.get("jobId") || ""), 10);
   const stage = String(form.get("stage") || "").trim();
-  if (!jobId || !stage) return NextResponse.redirect(new URL("/jobs/" + jobId, req.url));
+  if (!jobId || !stage) return redirectAfterPost("/jobs/" + jobId);
 
   const c = cookies();
   const session = c.get("shyft_session")?.value;
@@ -20,5 +21,5 @@ export async function POST(req: NextRequest) {
     addActivity({ description: `Moved to ${stage}`, byUserId: user.id, jobId });
   }
 
-  return NextResponse.redirect(new URL("/jobs/" + jobId, req.url));
+  return redirectAfterPost("/jobs/" + jobId);
 }
