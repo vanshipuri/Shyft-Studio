@@ -137,7 +137,7 @@ handoff verified end-to-end on a throwaway DB copy. Full numbers: `VERIFICATION_
 
 ---
 
-## Day 4 — UI/UX & Copilot polish pass
+## Day 3 — UI/UX & Copilot polish pass
 
 **Branch:** `arena/01a080df-shyft-studio` (follow-up pass on the merged submission).
 Follow-up request: *"make it smooth, responsive, and even [polished] — especially the
@@ -205,7 +205,7 @@ OWNER/SALES/PRODUCTION (200s) after the rebuild.
 
 ---
 
-## Day 5 — Pre-submission audit (running the checklist, not the feature list)
+## Day 3 — Pre-submission audit (running the checklist, not the feature list)
 
 The brief's own checklist item — *"run the 3 scenarios and they work"* — was executed as a
 human would: log in as each role, paste a messy enquiry, ask the Copilot plain questions,
