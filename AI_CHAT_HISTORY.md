@@ -1,6 +1,6 @@
 # AI Collaboration Log & Engineering Process — Shyft Studio
 
-**Session:** Arena.ai Agent Mode · **Branch:** `arena/01a080c2-shyft-studio`
+**Session:** Arena.ai Agent Mode · **Branches:** `arena/01a080c2`→`arena/01a081a8` (one session per working day)
 **Role:** AI Engineer Intern submission · **Candidate:** Vanshi · **Date:** 8 Sep 2026
 
 This log is the organized version of the Arena session transcript required by the
@@ -202,6 +202,59 @@ both the desktop bar and the mobile menu.
 ### 4.6 Verification (unchanged feature surface)
 `npm test` → 11/11 · `npm run build` → 19/19 routes · all pages smoke-tested over HTTP as
 OWNER/SALES/PRODUCTION (200s) after the rebuild.
+
+---
+
+## Day 5 — Pre-submission audit (running the checklist, not the feature list)
+
+The brief's own checklist item — *"run the 3 scenarios and they work"* — was executed as a
+human would: log in as each role, paste a messy enquiry, ask the Copilot plain questions,
+click repeat order. Note the test count grew across the build (11 → 19 → 21); the per-day
+numbers above are historical snapshots, not a contradiction.
+
+### 5.1 AI flagged a committed `.env` — the one item the checklist actually failed
+`git ls-files | grep env` showed `.env` tracked, and `.gitignore` had no rule for it. Its
+contents were a stale `DATABASE_URL` pointing at a file the app never reads (`db.mjs` uses
+`DB_PATH` → `./db.sqlite`), so nothing sensitive leaked — but "no .env in the repo" was a
+stated requirement and a reviewer would grep for it. **Action:** untracked it, extended
+`.gitignore` to `.env*`, left `.env.example` as the only committed reference. A one-line
+"no real credentials were ever committed" note went in the README so the fix is visible
+rather than silent.
+
+### 5.2 Candidate pushed back on scope, correctly
+The natural next move was "the parser mislabels flyers as Brochures, rewrite the extraction
+layer". Rejected: `/brochure|pamphlet|flyer|leaflet/` collapsing into one priced family is a
+deliberate modelling decision the eval is labelled against, and restructuring it the night
+before a deadline is how you trade a non-bug for a broken demo. Same reasoning killed a
+proposed per-clause message segmenter. **Rule adopted for this pass: fix what is wrong, not
+what is merely crude** — and write down what stayed crude (now two bullets in *Explicit
+scope cuts*).
+
+### 5.3 Two defects that only a user would hit
+- **Copilot recall.** `what should i (focus|do|prioritize)` was the entire briefing intent,
+  so *"what should Abhishek work on today"* fell through to the generic help menu. A
+  constrained router is the right architecture; it just has to recognize ordinary English.
+  Bonus behaviour the candidate asked for: naming a teammate switches the lens, so the Owner
+  asking about Siddhant gets the *production* brief.
+- **Dropped finish.** Cards honoured `matte`; brochures hard-coded gloss. A client who
+  specified matte got a gloss line item and nothing said so.
+  AI initially wanted to add a matte price tier — rejected as fabricating a rate the shop
+  doesn't charge. Final shape: correct the **label**, keep the **price** untouched, and push
+  genuinely-unpriced specs (`double sided`) to `missingInfo` for a human.
+
+### 5.4 Verification (measured, post-fix)
+`npm test` → **21/21** · `npm run eval` → **62/62, 0 failures** (deliberately re-run: a
+parser edit that leaves the eval untouched is the evidence that no quote drifted) ·
+`npm run build` → 19 routes, 0 TS errors · `npm audit` → 0 · `test:deploy` → 6/6 ·
+6 routes × 3 roles → 18/18 HTTP 200 · unauthenticated `/dashboard` → 307 `/login`.
+Also confirmed live: `https://shyft-studio-dfc3.onrender.com` serves the login page.
+
+### 5.5 Submission packaging decisions
+- The README previously had **no live URL in it** — a reviewer arriving via GitHub had no
+  way to click through. Added a demo block with all three logins up top.
+- `npm run seed` added as an alias of `db:seed` so the checklist's literal command works.
+- Render's free tier resets SQLite on redeploy; the demo therefore boots from the committed
+  `db.sqlite`. Documented as a limitation instead of being left for a reviewer to discover.
 
 ---
 

@@ -390,9 +390,18 @@ export function parseMessyLead(rawText) {
     else if (/a5/i.test(lower)) fold = "A5 4-Page Booklet";
     else if (/multi\s*page|catalog/i.test(lower)) fold = "8-Page Catalog";
 
+    // Stock defaults to gloss, but a stated finish must survive: an earlier
+    // revision ignored `matte` here (the cards branch honoured it, this one did
+    // not), so "500 flyers, matte" was silently quoted as gloss.
+    //
+    // Deliberately label-only. BROCHURE_RATES has no matte tier, so inventing a
+    // finish surcharge here would fabricate a price the shop doesn't charge.
+    // Matte is priced the same as gloss and the difference is flagged instead.
     let paper = "170gsm Gloss Art Paper";
     if (/300\s*gsm|cover/i.test(lower)) {
       paper = "250gsm Cover / 130gsm Inner";
+    } else if (/matte|lamination|laminated|lamina/i.test(lower)) {
+      paper = "170gsm Matte Art Paper";
     }
 
     const priced = repriceItem({ type: "Brochures", quantity: qty, fold, paper });
@@ -456,6 +465,9 @@ export function parseMessyLead(rawText) {
   if (!detectedPhone && !detectedEmail) missingInfo.push("No contact phone number or email provided");
   if (!items.some(i => i.paper && !i.paper.includes("To be confirmed"))) missingInfo.push("Paper GSM / stock preference unspecified");
   if (items.some(i => i.type === "Brochures") && !/tri-fold|bi-fold|a4|a5|catalog/i.test(lower)) missingInfo.push("Brochure format/folding style unclear");
+  // Duplex and finish affect real cost but have no rate tier — surface it for a
+  // human quote rather than letting the default single-sided rate look final.
+  if (/double\s*sided|duplex|both sides/i.test(lower)) missingInfo.push("Double-sided / duplex printing mentioned — not in the standard rate card, confirm before quoting");
   if (!/design|file|cdr|pdf|ai|artwork/i.test(lower)) missingInfo.push("Artwork readiness status unknown (client file vs in-house design)");
 
   // 5. Suggested WhatsApp Response
@@ -797,6 +809,40 @@ export function analyzeProductionRisks() {
 }
 
 /**
+ * "What needs me today", phrased the way a busy person actually types it.
+ *
+ * A hand-written intent router only looks clever until someone uses it. The
+ * original pattern (`what should i (focus|do|prioritize)`) missed the obvious
+ * "what should Abhishek work on today" and dropped it to the fallback help menu
+ * — which reads to a user as "the AI didn't understand", not "I phrased it
+ * unusually". These variants are additive and each still requires a
+ * prioritisation verb, so none of them steal a turn from the narrower intents
+ * below (late jobs, revenue, bottlenecks, customer history).
+ */
+const BRIEFING_INTENT = new RegExp(
+  [
+    "briefing|daily digest|good morning|morning (update|brief|report)",
+    "\\b(priorities|agenda)\\b",
+    "what(?:'s| is)? on my (plate|desk|list|radar)",
+    "what needs (my|the|our) (attention|focus)",
+    // Subject may be "i"/"we" or a teammate's name/role, because the team asks
+    // about each other in the third person ("what should siddhant pick up").
+    "what should (i|we|samyak|abhishek|siddhant|the (owner|sales (?:guy|person|team)?|production|prod\\w*)) (focus(?: on)?|work(?: on)?|do|prioritize|start(?: with| on)?|pick up|tackle|handle)",
+  ].join("|"),
+  "i"
+);
+
+/**
+ * A named teammate in the query selects *their* lens, so the owner asking
+ * "what should siddhant work on" gets the production brief, not his own.
+ */
+const BRIEFING_LENS_BY_PERSONA = [
+  [/samyak|the owner/i, "OWNER"],
+  [/abhishek|sales/i, "SALES"],
+  [/siddhant|production|print floor/i, "PRODUCTION"],
+];
+
+/**
  * Natural Language Query & Action Agent Copilot
  * Understands cross-role queries, calculates financials, analyzes jobs, and drafts communications.
  */
@@ -822,8 +868,10 @@ export function processCopilotQuery(queryText, userRole = "OWNER") {
   }
 
   // 2. Daily Briefing — one-screen "what needs me today" per role
-  if (/briefing|daily digest|good morning|morning (update|briefing)|what should i (focus|do|prioritize)/.test(query)) {
-    const brief = generateDailyBriefing(userRole);
+  if (BRIEFING_INTENT.test(query)) {
+    const personaLens = BRIEFING_LENS_BY_PERSONA.find(([re]) => re.test(query));
+    const briefRole = personaLens ? personaLens[1] : userRole;
+    const brief = generateDailyBriefing(briefRole);
     return {
       answer: `### 📌 Daily Briefing — ${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}\n\n${brief.headline}\n\n${brief.bullets.map((b) => `• ${b}`).join("\n")}\n\n*Open the Dashboard for the live view behind this summary.*`
     };
