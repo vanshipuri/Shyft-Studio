@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
 export default function MessyLeadModal() {
@@ -116,9 +117,11 @@ export default function MessyLeadModal() {
       </button>
 
       {/* Modal dialog */}
-      {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-950/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-4xl w-full p-6 md:p-8 shadow-2xl border border-brand-200 space-y-6 relative max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
+      {isOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-950/80 backdrop-blur-sm p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-4xl w-full p-5 sm:p-6 md:p-8 shadow-2xl border border-brand-200 space-y-6 relative max-h-[92vh] overflow-y-auto anim-enter scrollbar-slim">
             <button
               onClick={() => setIsOpen(false)}
               className="absolute top-6 right-6 w-8 h-8 rounded-full bg-brand-100 hover:bg-brand-200 text-brand-700 flex items-center justify-center font-bold text-sm transition"
@@ -160,19 +163,19 @@ export default function MessyLeadModal() {
             {/* Input textarea */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-brand-700">Paste Unstructured Text / Client Chat:</label>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <textarea
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                   rows={3}
                   placeholder="e.g. bhaiya 500 visiting cards chahiye urgently matte finish 300gsm with gold foil..."
-                  className="flex-1 rounded-xl border border-brand-300 bg-brand-50/50 p-3 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-amber/40 resize-none font-mono"
+                  className="w-full flex-1 min-w-0 rounded-xl border border-brand-300 bg-brand-50/50 p-3 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-amber/40 resize-none font-mono scrollbar-slim"
                 />
                 <button
                   type="button"
                   onClick={() => parseLead(inputText)}
                   disabled={isParsing || !inputText.trim()}
-                  className="px-5 rounded-xl bg-brand-900 text-white text-xs font-bold shadow-md hover:bg-brand-800 transition shrink-0 flex items-center gap-2"
+                  className="px-5 py-3 sm:py-0 rounded-xl bg-brand-900 text-white text-xs font-bold shadow-md hover:bg-brand-800 transition shrink-0 flex items-center justify-center gap-2 active:scale-[0.98]"
                 >
                   {isParsing ? "Extracting…" : "Extract Specs ✨"}
                 </button>
@@ -326,7 +329,8 @@ export default function MessyLeadModal() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

@@ -137,5 +137,73 @@ handoff verified end-to-end on a throwaway DB copy. Full numbers: `VERIFICATION_
 
 ---
 
+## Day 4 — UI/UX & Copilot polish pass
+
+**Branch:** `arena/01a080df-shyft-studio` (follow-up pass on the merged submission).
+Follow-up request: *"make it smooth, responsive, and even [polished] — especially the
+chatbot."* Functional coverage was already green (11/11, 19/19), so this pass was
+presentation and feel only — **no AI-engine or route behaviour changed**, re-verified
+after every step.
+
+### 4.1 One responsive shell instead of five hand-written headers
+Every page duplicated its own sticky header (brand + nav + quick actions + logout) with
+desktop-only links that overflowed on phones.
+
+**Decision (and the thing we rejected):** rather than adding a heavy component/animation
+library, we built one small client `TopNav` (`src/components/TopNav.tsx`) used by all five
+pages. On `lg+` it shows quick actions + nav inline; below that it collapses to a hamburger
+sheet containing the same actions. Page titles moved into consistent "eyebrow + title +
+count badge" heroes inside each `<main>`, so the sticky bar stays uniform across Dashboard,
+Pipeline, Customers, and both detail pages. Headers now breathe on mobile (`px-4 sm:px-6`,
+stacked grids, kanban columns with responsive min-heights instead of a fixed 500px).
+
+### 4.2 Animation utilities that actually exist
+The codebase was calling `animate-in fade-in zoom-in-95 duration-200` everywhere, but no
+`tailwindcss-animate` plugin is installed — those classes compiled to nothing, so modals
+and panels appeared/disappeared with zero transition.
+
+**Decision:** hand-rolled a tiny motion layer in `globals.css` (fade / rise / drop /
+enter / bubble-in keyframes with cubic-bezier easing, typing dots, status ping, exit
+animation) and replaced the dead class names. No new dependency.
+
+### 4.3 Modals escaped their ancestors (portal fix)
+The lead-intake, repeat-order, and persona-tour modals render inside the sticky blurred
+header. `backdrop-filter` ancestors can trap `position: fixed` descendants, and duplicating
+the modals into the mobile menu would have made that worse.
+
+**Decision:** all three modals now render through `createPortal(…, document.body)` —
+they always sit on top, never clipped by the header, and it is now safe to mount them in
+both the desktop bar and the mobile menu.
+
+### 4.4 Copilot chat rebuilt for feel
+`AssistantWidget` was rewritten:
+- **Responsive:** bottom-sheet on phones (82dvh, slide-up, tap-away backdrop) vs a floating
+  400px+ card on desktop (fade/scale in). FAB hides while open; Esc closes; iOS safe-area
+  respected in the composer.
+- **Smooth:** auto-scroll-to-latest with `scrollIntoView`-style smooth scrolling, animated
+  bubble entrances, real typing-dots indicator ("Pulling live pipeline data…") instead of a
+  static ping, exit transition before unmount, auto-growing textarea (Enter sends, Shift+Enter
+  newlines).
+- **More even typography:** markdown-lite rendering now groups consecutive bullets into one
+  `<ul>` and numbered lists into `<ol>` (the old renderer emitted orphan `<li>`s), proper
+  numbered badges, blockquotes, `<hr>`, headings; user/AI text is HTML-escaped before inline
+  bold/italic/code highlighting.
+- **Helpful:** per-role welcome + suggested chips shown until the first real question,
+  timestamps under bubbles, and a "Retry last question" affordance after a network error.
+
+### 4.5 What we rejected along the way
+- Adding `framer-motion` / `tailwindcss-animate` just to animate a few panels — pure CSS
+  keyframes cover it at zero install cost.
+- Rebuilding the board as drag-and-drop — the existing optimistic stage-move logic is
+  correct and tested; we only made its columns responsive.
+- Persisting chat across pages with a global store — out of scope for this pass; the widget
+  resets per page the same way it always did.
+
+### 4.6 Verification (unchanged feature surface)
+`npm test` → 11/11 · `npm run build` → 19/19 routes · all pages smoke-tested over HTTP as
+OWNER/SALES/PRODUCTION (200s) after the rebuild.
+
+---
+
 *This document is part of the submission per the "What to submit" requirements; the raw
 session transcript remains available in the Arena platform.*

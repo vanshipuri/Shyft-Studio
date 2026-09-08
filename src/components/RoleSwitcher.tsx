@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
 
 interface User {
@@ -123,9 +124,11 @@ export default function RoleSwitcher({ currentUser }: { currentUser: User }) {
       </div>
 
       {/* Persona Tour & Architecture Rationale Modal */}
-      {showGuide && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-950/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 md:p-8 shadow-2xl border border-brand-200 space-y-6 relative animate-in fade-in zoom-in-95 duration-200">
+      {showGuide &&
+        typeof document !== "undefined" &&
+        createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-950/80 backdrop-blur-sm p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-5 sm:p-6 md:p-8 shadow-2xl border border-brand-200 space-y-6 relative anim-enter max-h-[92vh] overflow-y-auto scrollbar-slim">
             <button
               onClick={() => setShowGuide(false)}
               className="absolute top-6 right-6 w-8 h-8 rounded-full bg-brand-100 hover:bg-brand-200 text-brand-700 flex items-center justify-center font-bold text-sm transition"
@@ -205,7 +208,8 @@ export default function RoleSwitcher({ currentUser }: { currentUser: User }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

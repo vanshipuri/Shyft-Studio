@@ -14,6 +14,7 @@ import {
 import { analyzeProductionRisks, computeReengagementNudges, generateDailyBriefing } from "@/lib/ai-engine.mjs";
 import AssistantWidget from "@/components/AssistantWidget";
 import RoleSwitcher from "@/components/RoleSwitcher";
+import TopNav from "@/components/TopNav";
 import MessyLeadModal from "@/components/MessyLeadModal";
 import RepeatOrderModal from "@/components/RepeatOrderModal";
 
@@ -58,43 +59,24 @@ export default async function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-surface">
-      {/* Top Role Switcher Bar */}
+      {/* Top Persona Switcher Bar */}
       <RoleSwitcher currentUser={user} />
 
-      {/* Main Navigation */}
-      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-brand-200/60">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-brand-950 to-brand-800 text-white flex items-center justify-center shadow-md shadow-brand-950/10">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 21a9 9 0 0 0 9-9c0-4.97-4.03-9-9-9s-9 4.03-9 9 4.03 9 9 9z"/><path d="M12 7v5l3 3"/></svg>
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-extrabold text-lg leading-none tracking-tight text-ink-900">Shyft Studio</h1>
-                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700 border border-brand-200">
-                  {user.role === "OWNER" ? "👑 Owner Dashboard" : user.role === "SALES" ? "💼 Sales Dashboard" : "⚙️ Production Dashboard"}
-                </span>
-              </div>
-              <p className="text-[11px] text-brand-500 font-medium leading-none mt-1">Single Source of Truth across Sales & Ops</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
+      {/* Shared responsive navigation */}
+      <TopNav
+        user={user}
+        active="dashboard"
+        quickActions={
+          <>
             <MessyLeadModal />
             <RepeatOrderModal customers={customers} />
-            <div className="h-4 w-px bg-brand-200 hidden sm:block" />
-            <Link href="/jobs" className="text-sm font-bold text-brand-700 hover:text-brand-950 transition">Pipeline</Link>
-            <Link href="/customers" className="text-sm font-bold text-brand-700 hover:text-brand-950 transition">Customers</Link>
-            <form action="/api/auth/logout" method="POST" className="inline">
-              <button className="text-xs font-bold text-rose bg-rose-soft hover:bg-rose/10 px-3 py-1.5 rounded-lg transition">Log out</button>
-            </form>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 sm:space-y-8">
         {/* Welcome Section */}
-        <section className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+        <section className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 anim-fade-up">
           <div>
             <div className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-500 mb-1 uppercase tracking-wider">
               {user.role === "OWNER" ? "Executive Radar" : user.role === "SALES" ? "Sales Pipeline & Ingestion" : "Print Floor Operations"}

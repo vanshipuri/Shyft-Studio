@@ -11,6 +11,7 @@ import {
   getJobChecklist
 } from "@/lib/db.mjs";
 import RoleSwitcher from "@/components/RoleSwitcher";
+import TopNav from "@/components/TopNav";
 import JobChecklist from "@/components/JobChecklist";
 import JobStageStepper from "@/components/JobStageStepper";
 import JobAiActions from "@/components/JobAiActions";
@@ -38,37 +39,43 @@ export default async function JobDetailPage({ params }: { params: { id: string }
 
   return (
     <div className="min-h-screen bg-surface">
-      {/* Top Persona Switcher */}
+      {/* Top Persona Switcher Bar */}
       <RoleSwitcher currentUser={user} />
 
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-brand-200/60">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <Link href="/jobs" className="text-xs font-bold text-brand-400 hover:text-brand-700">
-                ← Pipeline Board
-              </Link>
-              <span className="text-brand-300">•</span>
-              <span className="text-xs font-bold text-brand-500">Job #{job.id}</span>
-            </div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-ink-900 leading-tight mt-0.5">
+      {/* Shared responsive navigation */}
+      <TopNav
+        user={user}
+        active="pipeline"
+        quickActions={
+          <>
+            <MessyLeadModal />
+          </>
+        }
+      />
+
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+        {/* Breadcrumb + job title */}
+        <section className="anim-fade-up">
+          <nav className="flex items-center gap-2 text-xs font-bold text-brand-400" aria-label="Breadcrumb">
+            <Link href="/jobs" className="hover:text-brand-700 transition">
+              ← Pipeline Board
+            </Link>
+            <span aria-hidden="true" className="text-brand-300">•</span>
+            <span className="text-brand-600">Job #{job.id}</span>
+          </nav>
+          <div className="flex flex-wrap items-center gap-2.5 mt-2">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-ink-900 leading-tight">
               {job.title}
             </h1>
+            {job.is_late && (
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-black bg-rose text-white px-2.5 py-1 rounded-full tracking-wider shadow-sm shadow-rose/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                OVERDUE
+              </span>
+            )}
           </div>
+        </section>
 
-          <div className="flex items-center gap-3">
-            <MessyLeadModal />
-            <Link href="/dashboard" className="text-sm font-bold text-brand-700 hover:text-brand-950 transition">Dashboard</Link>
-            <Link href="/customers" className="text-sm font-bold text-brand-700 hover:text-brand-950 transition">Customers</Link>
-            <form action="/api/auth/logout" method="POST" className="inline">
-              <button className="text-xs font-bold text-rose bg-rose-soft hover:bg-rose/10 px-3 py-1.5 rounded-lg transition">Log out</button>
-            </form>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
         {/* Interactive Stage Stepper */}
         <JobStageStepper jobId={job.id} currentStage={job.stage} />
 
@@ -106,7 +113,6 @@ export default async function JobDetailPage({ params }: { params: { id: string }
                 )}
               </div>
 
-              <h2 className="text-xl font-extrabold text-ink-900">{job.title}</h2>
               <p className="text-brand-700 text-sm leading-relaxed whitespace-pre-wrap max-w-2xl bg-brand-50/50 p-4 rounded-2xl border border-brand-200/60">
                 {job.description || "No description provided."}
               </p>

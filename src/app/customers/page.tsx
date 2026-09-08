@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getUserByEmail, getCustomers, getJobs, getCustomerMetrics } from "@/lib/db.mjs";
 import RoleSwitcher from "@/components/RoleSwitcher";
+import TopNav from "@/components/TopNav";
 import MessyLeadModal from "@/components/MessyLeadModal";
 import RepeatOrderModal from "@/components/RepeatOrderModal";
 import AssistantWidget from "@/components/AssistantWidget";
@@ -19,32 +20,43 @@ export default function CustomersPage() {
 
   return (
     <div className="min-h-screen bg-surface">
-      {/* Top Role Switcher */}
+      {/* Top Persona Switcher Bar */}
       <RoleSwitcher currentUser={user} />
 
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-brand-200/60">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-ink-900">Customer 360 Accounts</h1>
-            <p className="text-xs text-brand-500 mt-0.5">Order history, lifetime value, and repeat orders without calling sales.</p>
-          </div>
-
-          <div className="flex items-center gap-3">
+      {/* Shared responsive navigation */}
+      <TopNav
+        user={user}
+        active="customers"
+        quickActions={
+          <>
             <MessyLeadModal />
             <RepeatOrderModal customers={customers} />
-            <div className="h-4 w-px bg-brand-200 hidden sm:block" />
-            <Link href="/dashboard" className="text-sm font-bold text-brand-700 hover:text-brand-950 transition">Dashboard</Link>
-            <Link href="/jobs" className="text-sm font-bold text-brand-700 hover:text-brand-950 transition">Pipeline</Link>
-            <form action="/api/auth/logout" method="POST" className="inline">
-              <button className="text-xs font-bold text-rose bg-rose-soft hover:bg-rose/10 px-3 py-1.5 rounded-lg transition">Log out</button>
-            </form>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+        {/* Page heading */}
+        <section className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 anim-fade-up">
+          <div>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-brand-400 mb-1">
+              Account memory · no more phone-book hunting
+            </p>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-ink-900 leading-tight">
+                Customer 360 Accounts
+              </h1>
+              <span className="text-xs font-extrabold px-2.5 py-1 rounded-full bg-brand-100 text-brand-700 border border-brand-200/70">
+                {customers.length} accounts
+              </span>
+            </div>
+            <p className="text-brand-600 mt-1.5 text-sm text-pretty max-w-2xl">
+              Order history, lifetime value, and repeat orders — without having to call sales.
+            </p>
+          </div>
+        </section>
+
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
           {customers.map((c: any) => {
             const m = getCustomerMetrics(c.id);
             const customerJobs = jobs.filter((j: any) => j.customer_id === c.id);
