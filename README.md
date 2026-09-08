@@ -55,26 +55,84 @@ Samyak runs a brochure & visiting-card printing business (B2B, team of 3). Befor
 
 ## How to run
 
+### Option A — Run locally
+
+Use **Node.js 22.x** (required by this project's `better-sqlite3` version).
+
 ```bash
-# 1. Install (already done in sandbox)
-npm install
+# Install the locked dependencies, including build tools
+npm ci --include=dev
 
-# 2. Database is seed-included (db.sqlite created by src/scripts/seed.js)
-# If you reset, run:
-node src/scripts/seed.js
-
-# 3. Start
+# db.sqlite already includes the demo data; no seeding step is needed
 npm run dev
-# or
-npm run build && npm start
 ```
 
-Then open `http://localhost:3000`.
+Then open `http://localhost:3000`. For a production build, run `npm run build`, then `npm start` instead of the dev server. Both servers bind to `0.0.0.0` and respect `PORT`, defaulting to `3000` locally.
+
+To regenerate demo data, **back up and move the existing `db.sqlite` out of the repository folder first**, then run `npm run db:seed` from the repo root. The seeder appends customers and jobs; do not run it repeatedly against a database you want to keep. Prisma is not used by the running app; `db:push` is a legacy command, not a setup step.
+
+On Windows, installing native SQLite may require Python and Visual Studio C++ build tools. Use Option B to avoid compiling anything on your PC.
 
 **Demo logins (password = `password123` for all):**
 - `samyak@shyft.studio` — Owner
 - `abhishek@shyft.studio` — Sales
 - `siddhant@shyft.studio` — Production
+
+### Option B — Deploy to Render (no local compile, including on Windows)
+
+You only need Git, the GitHub repository, and a Render account. Render installs and builds the app in its Linux **Node** runtime; no Dockerfile or local Visual Studio installation is needed. The root-level [`render.yaml`](render.yaml) is already included.
+
+#### 1. Publish the deployment changes
+
+This session uses **`arena/01a07f3e-shyft-studio`**, not `main`. From your cloned `Shyft-Studio` folder, verify that branch before proceeding. The commands below work in PowerShell or Bash. If the changes are already committed, skip the `add` and `commit` steps.
+
+```bash
+git branch --show-current
+# Expected: arena/01a07f3e-shyft-studio
+
+git add render.yaml README.md AI_CHAT_HISTORY.md package.json package-lock.json
+git add src/lib/redirect.ts src/app/api/auth src/app/api/jobs/update-stage src/app/api/notes/add tests/render.test.mjs
+git diff --cached
+git commit -m "Configure Render demo deployment"
+git push origin arena/01a07f3e-shyft-studio
+```
+
+Do not pull or push `main` for this session; Render must deploy the branch containing these changes.
+
+#### 2. Create the service from the Blueprint
+
+1. Open [Render](https://dashboard.render.com/) → **New → Blueprint**.
+2. Connect **`vanshipuri/Shyft-Studio`** and select **`arena/01a07f3e-shyft-studio`** as the Blueprint branch, using `render.yaml`.
+3. Review the service configuration (the Blueprint explicitly selects the **Free** instance type), then deploy.
+4. Wait for the build and `/login` health check to pass. Open the **actual `onrender.com` URL shown in the dashboard** and use a demo login above. The service name/URL may receive a suffix; `https://shyft-studio.onrender.com` is not guaranteed to be available.
+
+**Manual alternative:** choose **New → Web Service**, connect the same repo and branch, and enter the values below. A manually created Web Service does not automatically apply `render.yaml`.
+
+| Setting | Value |
+|---|---|
+| Branch | `arena/01a07f3e-shyft-studio` |
+| Language / runtime | Node |
+| Root directory | Leave blank (repository root) |
+| Instance type | Free |
+| Build command | `npm ci --include=dev && npm run build` |
+| Start command | `npm start` |
+| Health check path | `/login` |
+| Environment variables | `NODE_ENV=production`, `NODE_VERSION=22` |
+
+Do not create a Static Site: this app needs a Node server for its APIs and SQLite. Leave `PORT` managed by Render; `npm start` reads it automatically. `--include=dev` ensures TypeScript, Tailwind, and other build dependencies are installed even with `NODE_ENV=production`.
+
+#### Demo storage and security caveats
+
+- The committed `db.sqlite` contains **3 users, 5 customers, and 9 jobs**. No API key, Prisma generation, or deploy-time seeding command is required. Do **not** add the seeder to the build/start command, or it will duplicate demo records.
+- **SQLite edits are temporary on the Free plan.** Render loses filesystem changes when the service restarts, redeploys, or spins down after inactivity. The next instance starts from the bundled seed database. Free services also have a cold-start delay. See [Render's Free instance limitations](https://render.com/docs/free).
+- Durable data needs a paid service with a persistent disk and runtime database initialization (the app supports a `DB_PATH` override), or a migration to an external database. Changing the instance plan alone does not make SQLite persistent. This Blueprint does not provision paid storage.
+- **Use synthetic demo data only.** The shared passwords, unsigned session cookies, and API authorization need hardening. Existing dependency audit findings are noted below; this deployment configuration does not make the app production-safe.
+
+#### Verify before sharing
+
+With the production server running locally (`npm run build`, then `npm start`), run `npm run test:deploy` in a second terminal. The read-only smoke tests cover the login health check, all three demo logins/dashboard access, rejected credentials, and proxy-safe form redirects/logout. Set `TEST_BASE_URL` if the server uses a port other than `3000`.
+
+After deployment, also check login → pipeline → job details → logout at the Render URL. Add that **verified URL**, not an assumed hostname, to your submission. Creating the configuration file alone does not publish or deploy the app.
 
 ---
 
@@ -105,7 +163,7 @@ Then open `http://localhost:3000`.
 
 ## AI / Chat tools usage (required by brief)
 
-- **Used:** This conversation (Arena AI assistant — Claude-class model) for architecture, component design, database schema, and debugging
+- **Used:** Arena.ai Agent Mode for architecture, component design, database schema, and debugging
 - **How I directed it:** Asked for Next.js App Router patterns, SQLite schema designs, Tailwind utility classes for kanban boards, and error fixes (native module resolution, JSX parser issues)
 - **What I rejected / changed:** Initially tried Prisma (binary download failed in sandbox), switched to `better-sqlite3`; rejected generic ChatGPT wrapper for assistant in favor of domain-specific parser; replaced broken relative imports with `baseUrl` + `@/lib` absolute imports
 - **History:** See `AI_CHAT_HISTORY.md`
@@ -121,6 +179,7 @@ Then open `http://localhost:3000`.
 - **No real LLM backend:** Assistant is rule-based + SQL; can plug in Anthropic/OpenAI by replacing `/api/ask` logic (code is structured with clear `if/else` branches for easy swap)
 - **Login is simple cookie auth:** No OAuth, no MFA — appropriate for 3-person internal use, not production-grade
 - **No automated backups:** SQLite file is the single source; for production, migrate to PostgreSQL and add backups
+- **Dependency security review outstanding:** `npm audit` on 8 Sep 2026 reported 1 critical and 1 high dependency finding (Next.js and its nested PostCSS dependency). Upgrade and re-test dependencies before production use; the Render configuration does not address these existing findings.
 
 ---
 
@@ -144,16 +203,19 @@ src/
 README.md
 AI_CHAT_HISTORY.md
 package.json
-prisma/         # Schema kept for reference (not used — see note) -- actually removed to avoid confusion; see db.mjs
+render.yaml     # Free Render demo deployment (Node runtime)
+tests/
+  render.test.mjs # Read-only production/proxy smoke tests
+prisma/         # Legacy schema; not used by the app or deployment
 ```
 
 ---
 
 ## Submitting
 
-- **Repo:** This checkout (`arena/01a07d40-shyft-studio`) — ready to push to origin
-- **Run it:** `npm install && npm run dev` (dev server is running at `localhost:3000`)
-- **Seed:** Already present (`db.sqlite`)
+- **Repo:** [vanshipuri/Shyft-Studio](https://github.com/vanshipuri/Shyft-Studio), deployment changes on `arena/01a07f3e-shyft-studio`
+- **Run it:** Use Option A above, or publish the branch and deploy with Option B. Include the verified Render URL when submitting; no hosted URL is implied by this README.
+- **Seed:** Already present (`db.sqlite`); regeneration script at `src/scripts/seed.js`
 - **README:** This file
 - **AI history:** `AI_CHAT_HISTORY.md`
 

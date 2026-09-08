@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
+import { redirectAfterPost } from "@/lib/redirect";
 
 export async function POST() {
-  const res = NextResponse.redirect(new URL("/login", "http://localhost"));
+  const res = redirectAfterPost("/login");
   res.cookies.set("shyft_session", "", { httpOnly: true, path: "/", maxAge: 0 });
   return res;
 }
