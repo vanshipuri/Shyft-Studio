@@ -81,7 +81,7 @@ export default function JobAiActions({
       </div>
 
       {output && (
-        <div className="pt-2 border-t border-brand-800/80 space-y-2 animate-in fade-in">
+        <div className="pt-2 border-t border-brand-800/80 space-y-2 anim-fade">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-brand-400">Generated Output:</span>
             <button

@@ -294,7 +294,7 @@ export default function PipelineBoard({
           const stageTotalRevenue = stageJobs.reduce((s, j) => s + (j.quote_amount || 0), 0);
 
           return (
-            <div key={stage} className="rounded-3xl bg-white border border-brand-200/80 shadow-sm flex flex-col min-h-[500px]">
+            <div key={stage} className="rounded-3xl bg-white border border-brand-200/80 shadow-sm flex flex-col min-h-[280px] sm:min-h-[340px] lg:min-h-[440px] xl:min-h-[520px]">
               {/* Column Header */}
               <div className={`px-4 py-3.5 rounded-t-3xl border-b flex items-center justify-between ${stageColors[stage]}`}>
                 <div>

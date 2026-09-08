@@ -10,6 +10,7 @@ import {
   getCustomers
 } from "@/lib/db.mjs";
 import RoleSwitcher from "@/components/RoleSwitcher";
+import TopNav from "@/components/TopNav";
 import RepeatOrderModal from "@/components/RepeatOrderModal";
 import MessyLeadModal from "@/components/MessyLeadModal";
 import AssistantWidget from "@/components/AssistantWidget";
@@ -32,38 +33,33 @@ export default async function CustomerDetailPage({ params }: { params: { id: str
 
   return (
     <div className="min-h-screen bg-surface">
-      {/* Top Role Switcher */}
+      {/* Top Persona Switcher Bar */}
       <RoleSwitcher currentUser={user} />
 
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-brand-200/60">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <Link href="/customers" className="text-xs font-bold text-brand-400 hover:text-brand-700">
-                ← Customers Directory
-              </Link>
-              <span className="text-brand-300">•</span>
-              <span className="text-xs font-bold text-brand-500">Customer #{customer.id}</span>
-            </div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-ink-900 leading-tight mt-0.5">
-              {customer.name}
-            </h1>
-          </div>
-
-          <div className="flex items-center gap-3">
+      {/* Shared responsive navigation */}
+      <TopNav
+        user={user}
+        active="customers"
+        quickActions={
+          <>
             <RepeatOrderModal customers={allCustomers} initialCustomerId={customer.id} />
             <MessyLeadModal />
-            <Link href="/dashboard" className="text-sm font-bold text-brand-700 hover:text-brand-950 transition">Dashboard</Link>
-            <Link href="/jobs" className="text-sm font-bold text-brand-700 hover:text-brand-950 transition">Pipeline</Link>
-            <form action="/api/auth/logout" method="POST" className="inline">
-              <button className="text-xs font-bold text-rose bg-rose-soft hover:bg-rose/10 px-3 py-1.5 rounded-lg transition">Log out</button>
-            </form>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
-      <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+        {/* Breadcrumb */}
+        <section className="anim-fade-up">
+          <nav className="flex items-center gap-2 text-xs font-bold text-brand-400" aria-label="Breadcrumb">
+            <Link href="/customers" className="hover:text-brand-700 transition">
+              ← Customers Directory
+            </Link>
+            <span aria-hidden="true" className="text-brand-300">•</span>
+            <span className="text-brand-600">Customer #{customer.id}</span>
+          </nav>
+        </section>
+
         {/* Customer 360 Hero Profile */}
         <section className="rounded-3xl bg-white border border-brand-200/80 shadow-sm p-6 md:p-8 space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -73,7 +69,7 @@ export default async function CustomerDetailPage({ params }: { params: { id: str
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-extrabold text-ink-900">{customer.name}</h2>
+                  <h1 className="text-xl sm:text-2xl font-extrabold text-ink-900">{customer.name}</h1>
                   {metrics.isRepeat && (
                     <span className="text-xs font-extrabold bg-emerald-soft text-emerald px-2.5 py-0.5 rounded-full border border-emerald/20">
                       Regular Client
@@ -89,9 +85,6 @@ export default async function CustomerDetailPage({ params }: { params: { id: str
               </div>
             </div>
 
-            <div className="flex gap-2">
-              <RepeatOrderModal customers={allCustomers} initialCustomerId={customer.id} />
-            </div>
           </div>
 
           {/* Metric KPI Tiles */}
