@@ -75,7 +75,7 @@ export default function JobChecklist({
             key={item.id || idx}
             className={`flex items-center gap-3 p-3 rounded-2xl border transition cursor-pointer select-none ${
               item.done
-                ? "bg-emerald-soft/40 border-emerald/20 text-emerald-900"
+                ? "bg-emerald-soft/40 border-emerald/20 text-emerald"
                 : "bg-brand-50/60 border-brand-200 hover:bg-brand-50 text-ink-900"
             }`}
           >
