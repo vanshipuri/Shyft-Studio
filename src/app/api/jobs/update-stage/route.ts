@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redirectAfterPost } from "@/lib/redirect";
-import { db, addActivity, updateJob, getJobById } from "@/lib/db.mjs";
+import { db, addActivity, updateJob, getJobById, getAllUsers, getUserById } from "@/lib/db.mjs";
 import { cookies } from "next/headers";
 import { getUserByEmail } from "@/lib/db.mjs";
+import { isValidStage, resolveStageOwner } from "@/lib/pipeline.mjs";
 
 export async function POST(req: NextRequest) {
   let jobId: number = 0;
@@ -22,9 +23,9 @@ export async function POST(req: NextRequest) {
     redirectUrl = String(form.get("redirectUrl") || `/jobs/${jobId}`);
   }
 
-  if (!jobId || !stage) {
+  if (!jobId || !stage || !isValidStage(stage)) {
     if (contentType.includes("application/json")) {
-      return NextResponse.json({ success: false, error: "Missing jobId or stage" }, { status: 400 });
+      return NextResponse.json({ success: false, error: "Missing or invalid jobId/stage" }, { status: 400 });
     }
     return redirectAfterPost("/jobs/" + (jobId || ""));
   }
@@ -34,17 +35,38 @@ export async function POST(req: NextRequest) {
   const user = session ? getUserByEmail(session) : null;
 
   const currentJob = getJobById(jobId);
-  const oldStage = currentJob?.stage || "Unknown";
+  if (!currentJob) {
+    if (contentType.includes("application/json")) {
+      return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
+    }
+    return redirectAfterPost("/jobs/" + (jobId || ""));
+  }
+  const oldStage = currentJob.stage;
 
-  updateJob(jobId, { stage, is_late: stage === "DELIVERED" ? 0 : (currentJob?.is_late ?? 0) });
+  // Ownership is derived from the pipeline, not a free-text field: every stage
+  // has exactly one default owner (Sales / Production), and the job follows it
+  // on transition so "whose job is this?" always has a single answer.
+  const currentAssignee = currentJob.assigned_to ? getUserById(currentJob.assigned_to) : null;
+  const ownerUserId = resolveStageOwner(stage, currentAssignee, getAllUsers());
+  const ownerChanged = ownerUserId !== currentJob.assigned_to;
 
-  // Add activity
+  updateJob(jobId, {
+    stage,
+    is_late: stage === "DELIVERED" ? 0 : (currentJob.is_late ?? 0),
+    assigned_to: ownerUserId
+  });
+
+  // Add activity — the audit trail records the handoff explicitly.
   if (user) {
+    const owner = ownerUserId ? getUserById(ownerUserId) : null;
+    const ownerSuffix = ownerChanged && owner
+      ? ` — now owned by ${owner.name} (${owner.role})`
+      : ` — owner: ${owner ? owner.name : "unassigned"}`;
     addActivity({
-      description: `Moved stage from ${oldStage} → ${stage}`,
+      description: `Moved stage from ${oldStage} → ${stage}${ownerSuffix}`,
       byUserId: user.id,
       jobId,
-      customerId: currentJob?.customer_id
+      customerId: currentJob.customer_id
     });
   }
 

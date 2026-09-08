@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { db, getUserByEmail, createJob, createCustomer, addActivity, getCustomers } from "@/lib/db.mjs";
+import { db, getUserByEmail, createJob, createCustomer, addActivity, getCustomers, getAllUsers } from "@/lib/db.mjs";
 import { redirectAfterPost } from "@/lib/redirect";
+import { resolveStageOwner } from "@/lib/pipeline.mjs";
 
 export async function POST(req: NextRequest) {
   try {
@@ -66,11 +67,15 @@ export async function POST(req: NextRequest) {
       customerId = firstCust ? firstCust.id : createCustomer({ name: "General Client" });
     }
 
+    const newJobStage = data.stage || "ENQUIRY";
+    // Default the assignee to the stage's canonical owner unless one was given.
+    const assignedTo = data.assignedTo || resolveStageOwner(newJobStage, null, getAllUsers());
+
     const newJobId = createJob({
       title: data.title,
       description: data.description || "",
-      stage: data.stage || "ENQUIRY",
-      assignedTo: data.assignedTo || (currentUser?.role === "SALES" ? currentUser.id : null),
+      stage: newJobStage,
+      assignedTo,
       customerId,
       quoteAmount: data.quoteAmount || null,
       dueDate: data.dueDate || null,

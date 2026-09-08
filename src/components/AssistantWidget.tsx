@@ -15,22 +15,25 @@ export default function AssistantWidget({ role = "OWNER" }: { role?: string }) {
 
   const promptsByRole: Record<string, string[]> = {
     OWNER: [
+      "Give me today's briefing",
       "What is our active pipeline value?",
+      "Which repeat clients are due for a check-in?",
       "Show production bottlenecks & machine load",
-      "What did Neha from BrightTech order last time?",
       "Draft an apology message for Singh & Sons delay"
     ],
     SALES: [
-      "What did BrightTech order previously?",
       "Show unquoted leads needing follow-up",
-      "Draft follow-up for Priya Nair enquiry",
-      "What is the total value of quoted deals?"
+      "Which repeat clients are due for a check-in?",
+      "Who hasn't ordered in 60 days?",
+      "What did BrightTech order previously?",
+      "Draft follow-up for Priya Nair enquiry"
     ],
     PRODUCTION: [
       "Show jobs currently on the print floor",
       "Which jobs have paper stock or lamination flags?",
-      "Check status of Job #6 and #7",
-      "What is our machine throughput today?"
+      "What is our active pipeline value?",
+      "Show production bottlenecks & machine load",
+      "Give me today's briefing"
     ]
   };
 

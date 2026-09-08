@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { PIPELINE, ownerShortLabelForStage } from "@/lib/pipeline.mjs";
 
 interface Job {
   id: number;
@@ -64,7 +65,7 @@ export default function PipelineBoard({
   const customerMap = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
-  const stages = ["ENQUIRY", "QUOTED", "DESIGN", "PRINTING", "READY", "DELIVERED"] as const;
+  const stages = PIPELINE.map((s) => s.id) as string[];
   const stageLabels: Record<string, string> = {
     ENQUIRY: "Enquiry",
     QUOTED: "Quoted",
@@ -301,6 +302,9 @@ export default function PipelineBoard({
                   <div className="text-[11px] font-bold opacity-80 mt-0.5">
                     ₹{stageTotalRevenue.toLocaleString("en-IN")}
                   </div>
+                  <div className="text-[10px] font-semibold opacity-75 mt-0.5">
+                    👤 Owner: {ownerShortLabelForStage(stage)}
+                  </div>
                 </div>
                 <span className={`text-xs font-black px-2 py-0.5 rounded-full ${
                   stage === "PRINTING" ? "bg-white/20 text-white" : "bg-white text-ink-900 shadow-2xs"
@@ -403,7 +407,7 @@ export default function PipelineBoard({
                             {j.priority}
                           </span>
                           <span className="text-brand-500 font-medium">
-                            {assignedUser ? assignedUser.name.split(" ")[0] : "Unassigned"}
+                            Owner: {assignedUser ? assignedUser.name.split(" ")[0] : ownerShortLabelForStage(j.stage)}
                           </span>
                         </div>
                       </div>
