@@ -1,7 +1,21 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { getUserByEmail, getCustomers, getJobs, getLateJobs, getStageCounts, getNotesForJob } from "@/lib/db.mjs";
-import AssistantWidget from "../../components/AssistantWidget";
+import Link from "next/link";
+import {
+  getUserByEmail,
+  getCustomers,
+  getJobs,
+  getLateJobs,
+  getStageCounts,
+  getPipelineMetrics,
+  getTeamWorkload,
+  getCustomerMetrics
+} from "@/lib/db.mjs";
+import { analyzeProductionRisks } from "@/lib/ai-engine.mjs";
+import AssistantWidget from "@/components/AssistantWidget";
+import RoleSwitcher from "@/components/RoleSwitcher";
+import MessyLeadModal from "@/components/MessyLeadModal";
+import RepeatOrderModal from "@/components/RepeatOrderModal";
 
 export default async function DashboardPage() {
   const c = cookies();
@@ -10,10 +24,15 @@ export default async function DashboardPage() {
   const user = getUserByEmail(session);
   if (!user) redirect("/login");
 
-  const totalJobs = getJobs().length;
+  const allJobs = getJobs();
   const lateJobs = getLateJobs();
   const stages = getStageCounts();
   const customers = getCustomers();
+  const metrics = getPipelineMetrics();
+  const teamWorkload = getTeamWorkload();
+  const riskAnalysis = analyzeProductionRisks();
+
+  const customerMap = new Map<number, any>(customers.map((c: any) => [c.id, c]));
 
   const stageColors: Record<string, string> = {
     ENQUIRY: "bg-amber-soft text-amber-deep border-amber/20",
@@ -25,140 +44,506 @@ export default async function DashboardPage() {
   };
 
   const stageLabels: Record<string, string> = {
-    ENQUIRY: "Enquiry", QUOTED: "Quoted", DESIGN: "Design", PRINTING: "Printing", READY: "Ready", DELIVERED: "Delivered",
+    ENQUIRY: "Enquiry",
+    QUOTED: "Quoted",
+    DESIGN: "Design",
+    PRINTING: "Printing",
+    READY: "Ready",
+    DELIVERED: "Delivered",
   };
 
   const stageOrder = ["ENQUIRY", "QUOTED", "DESIGN", "PRINTING", "READY", "DELIVERED"];
 
   return (
     <div className="min-h-screen bg-surface">
-      {/* Header */}
+      {/* Top Role Switcher Bar */}
+      <RoleSwitcher currentUser={user} />
+
+      {/* Main Navigation */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-brand-200/60">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-900 to-brand-700 text-white flex items-center justify-center shadow-md shadow-brand-900/10">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 21a9 9 0 0 0 9-9c0-4.97-4.03-9-9-9s-9 4.03-9 9 4.03 9 9 9z"/><path d="M12 7v5l3 3"/></svg>
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-brand-950 to-brand-800 text-white flex items-center justify-center shadow-md shadow-brand-950/10">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 21a9 9 0 0 0 9-9c0-4.97-4.03-9-9-9s-9 4.03-9 9 4.03 9 9 9z"/><path d="M12 7v5l3 3"/></svg>
             </div>
             <div>
-              <h1 className="font-extrabold text-lg leading-none tracking-tight text-ink-900">Shyft Studio</h1>
-              <p className="text-[11px] text-brand-500 font-medium leading-none mt-1">Internal / {user.role === "OWNER" ? "Owner" : user.role === "SALES" ? "Sales" : "Production"}</p>
+              <div className="flex items-center gap-2">
+                <h1 className="font-extrabold text-lg leading-none tracking-tight text-ink-900">Shyft Studio</h1>
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700 border border-brand-200">
+                  {user.role === "OWNER" ? "👑 Owner Dashboard" : user.role === "SALES" ? "💼 Sales Dashboard" : "⚙️ Production Dashboard"}
+                </span>
+              </div>
+              <p className="text-[11px] text-brand-500 font-medium leading-none mt-1">Single Source of Truth across Sales & Ops</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <a href="/customers" className="text-sm font-semibold text-brand-600 hover:text-brand-900 transition">Customers</a>
-            <a href="/jobs" className="text-sm font-semibold text-brand-600 hover:text-brand-900 transition">Pipeline</a>
-            <form action="/api/auth/logout" method="POST" className="inline"><button className="text-xs font-bold text-rose bg-rose-soft hover:bg-rose/10 px-3 py-1.5 rounded-lg transition">Log out</button></form>
+
+          <div className="flex items-center gap-3">
+            <MessyLeadModal />
+            <RepeatOrderModal customers={customers} />
+            <div className="h-4 w-px bg-brand-200 hidden sm:block" />
+            <Link href="/jobs" className="text-sm font-bold text-brand-700 hover:text-brand-950 transition">Pipeline</Link>
+            <Link href="/customers" className="text-sm font-bold text-brand-700 hover:text-brand-950 transition">Customers</Link>
+            <form action="/api/auth/logout" method="POST" className="inline">
+              <button className="text-xs font-bold text-rose bg-rose-soft hover:bg-rose/10 px-3 py-1.5 rounded-lg transition">Log out</button>
+            </form>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        {/* Welcome + actions */}
+        {/* Welcome Section */}
         <section className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
-            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink-900 leading-tight">Welcome back, {user.name.split(" ")[0]}.</h2>
-            <p className="text-brand-600 mt-2 text-base max-w-xl">{lateJobs.length > 0 ? `There ${lateJobs.length === 1 ? "is" : "are"} ${lateJobs.length} job${lateJobs.length === 1 ? "" : "s"} running late — let's get ahead of them.` : "Pipeline is healthy. Here's what needs your attention today."}</p>
-          </div>
-          <div className="flex gap-3">
-            <a href="/jobs" className="inline-flex items-center gap-2 rounded-xl bg-brand-900 text-white px-5 py-3 text-sm font-bold shadow-xl shadow-brand-900/15 hover:shadow-2xl hover:-translate-y-0.5 transition">View pipeline</a>
-            <a href="/customers" className="inline-flex items-center gap-2 rounded-xl bg-white border border-brand-200 text-brand-800 px-5 py-3 text-sm font-bold shadow-sm hover:shadow-md hover:-translate-y-0.5 transition">Customers</a>
-          </div>
-        </section>
-
-        {/* Stats */}
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: "Total jobs", value: totalJobs, sub: "In progress", color: "bg-brand-900 text-white" },
-            { label: "Late / at risk", value: lateJobs.length, sub: "Need attention", color: lateJobs.length ? "bg-rose text-white" : "bg-emerald text-white" },
-            { label: "In Design", value: stages.find((s: any) => s.stage === "DESIGN")?.count || 0, sub: "Waiting for sign-off", color: "bg-rose-soft text-rose border border-rose/10" },
-            { label: "Customers", value: customers.length, sub: "Active accounts", color: "bg-brand-100 text-brand-800 border border-brand-200" },
-          ].map((s) => (
-            <a href={s.label === "Total jobs" || s.label === "Late / at risk" ? "/jobs" : s.label === "In Design" ? "/jobs" : "/customers"} key={s.label} className={`rounded-2xl p-6 shadow-sm border transition hover:-translate-y-0.5 hover:shadow-md ${s.color.includes("text-white") ? s.color + " shadow-lg shadow-brand-900/10" : s.color}`}>
-              <div className="text-xs font-bold uppercase tracking-wide opacity-80">{s.label}</div>
-              <div className="text-4xl font-extrabold tracking-tighter mt-1">{s.value}</div>
-              <div className="text-xs font-medium mt-2 opacity-80">{s.sub}</div>
-            </a>
-          ))}
-        </section>
-
-        {/* Late banner */}
-        {lateJobs.length > 0 && (
-          <section className="rounded-2xl bg-gradient-to-r from-rose/10 to-rose-soft border border-rose/20 p-6 flex flex-col md:flex-row md:items-center gap-4 shadow-sm">
-            <div className="w-10 h-10 rounded-full bg-rose text-white flex items-center justify-center shadow-md shadow-rose/20 shrink-0">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <div className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-500 mb-1 uppercase tracking-wider">
+              {user.role === "OWNER" ? "Executive Radar" : user.role === "SALES" ? "Sales Pipeline & Ingestion" : "Print Floor Operations"}
             </div>
-            <div className="flex-1">
-              <h3 className="font-extrabold text-ink-900">Late / at-risk jobs</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {lateJobs.map((j: any) => (
-                  <a key={j.id} href={`/jobs/${j.id}`} className="inline-flex items-center gap-2 rounded-lg bg-white/70 border border-rose/20 px-3 py-1.5 text-sm font-bold text-rose hover:bg-white transition shadow-sm">
-                    {j.title} <span className="text-[10px] bg-rose text-white px-1.5 py-0.5 rounded-full font-extrabold">{j.stage}</span>
-                  </a>
-                ))}
+            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-ink-900 leading-tight">
+              Welcome back, {user.name.split(" ")[0]}.
+            </h2>
+            <p className="text-brand-600 mt-1 text-sm max-w-2xl">
+              {user.role === "OWNER"
+                ? `Active pipeline sits at ₹${metrics.pipelineValue.toLocaleString("en-IN")}. ${lateJobs.length > 0 ? `⚠️ ${lateJobs.length} job running late requiring floor intervention.` : "All stages operating on schedule."}`
+                : user.role === "SALES"
+                ? `You have ${allJobs.filter((j: any) => j.stage === "ENQUIRY").length} unquoted enquiry and ₹${metrics.quotedValue.toLocaleString("en-IN")} in quoted deals awaiting client sign-off.`
+                : `You have ${allJobs.filter((j: any) => j.stage === "PRINTING").length} jobs on the print floor and ${allJobs.filter((j: any) => j.stage === "READY").length} ready for dispatch.`}
+            </p>
+          </div>
+
+          <div className="flex gap-2.5 shrink-0">
+            <Link
+              href="/jobs"
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-900 hover:bg-brand-800 text-white px-4 py-2.5 text-xs font-bold shadow-md shadow-brand-900/15 transition hover:-translate-y-0.5"
+            >
+              Open Pipeline Board →
+            </Link>
+          </div>
+        </section>
+
+        {/* ------------------------------------------------------------- */}
+        {/* 1. OWNER / EXECUTIVE ROLE VIEW                                */}
+        {/* ------------------------------------------------------------- */}
+        {user.role === "OWNER" && (
+          <div className="space-y-8">
+            {/* Executive KPIs */}
+            <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="rounded-2xl p-5 shadow-sm border bg-brand-950 text-white">
+                <div className="text-xs font-bold uppercase tracking-wide text-brand-300">Active Pipeline Value</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1 text-amber">₹{metrics.pipelineValue.toLocaleString("en-IN")}</div>
+                <div className="text-xs text-brand-400 mt-1.5">{metrics.activeJobsCount} active jobs across stages</div>
+              </div>
+
+              <div className="rounded-2xl p-5 shadow-sm border bg-white border-brand-200">
+                <div className="text-xs font-bold uppercase tracking-wide text-brand-500">Delivered Realized Revenue</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1 text-emerald">₹{metrics.realizedRevenue.toLocaleString("en-IN")}</div>
+                <div className="text-xs text-brand-400 mt-1.5">{metrics.deliveredJobsCount} completed jobs</div>
+              </div>
+
+              <div className={`rounded-2xl p-5 shadow-sm border ${lateJobs.length > 0 ? "bg-rose-soft border-rose/30 text-rose" : "bg-white border-brand-200 text-brand-900"}`}>
+                <div className="text-xs font-bold uppercase tracking-wide opacity-80">Revenue at Late Risk</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1">₹{metrics.lateRevenue.toLocaleString("en-IN")}</div>
+                <div className="text-xs font-semibold mt-1.5 opacity-80">{lateJobs.length} job(s) past promised SLA</div>
+              </div>
+
+              <div className="rounded-2xl p-5 shadow-sm border bg-white border-brand-200">
+                <div className="text-xs font-bold uppercase tracking-wide text-brand-500">Average Ticket Size</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1 text-ink-900">₹{metrics.averageTicketSize.toLocaleString("en-IN")}</div>
+                <div className="text-xs text-brand-400 mt-1.5">Across {customers.length} client accounts</div>
+              </div>
+            </section>
+
+            {/* Bottlenecks Radar & Workload Grid */}
+            <div className="grid lg:grid-cols-3 gap-6">
+              {/* Bottleneck Radar */}
+              <div className="lg:col-span-2 rounded-3xl bg-white border border-brand-200 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-extrabold text-ink-900">Operational Bottleneck Radar</h3>
+                    <p className="text-xs text-brand-500">Automated diagnostic of print floor throughput & delays</p>
+                  </div>
+                  <span className={`text-xs font-extrabold px-3 py-1 rounded-full ${riskAnalysis.overallHealth === "Healthy" ? "bg-emerald-soft text-emerald" : "bg-rose-soft text-rose"}`}>
+                    {riskAnalysis.overallHealth}
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {riskAnalysis.bottlenecks.map((b: any, i: number) => (
+                    <div key={i} className="p-4 rounded-2xl bg-brand-50 border border-brand-200/80 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-xs text-ink-900 uppercase tracking-wider">
+                          Stage: {b.stage}
+                        </span>
+                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${b.severity === "Critical" ? "bg-rose text-white" : b.severity === "High" ? "bg-amber text-brand-950" : "bg-brand-200 text-brand-800"}`}>
+                          {b.severity} Severity
+                        </span>
+                      </div>
+                      <p className="text-xs text-brand-700">{b.description}</p>
+                      <div className="pt-2 text-xs font-bold text-amber-deep flex items-center gap-1.5">
+                        <span>💡 Recommended Action:</span> {b.solution}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Team Workload Distribution */}
+              <div className="rounded-3xl bg-white border border-brand-200 shadow-sm p-6 space-y-4">
+                <div>
+                  <h3 className="text-lg font-extrabold text-ink-900">Team Workload Split</h3>
+                  <p className="text-xs text-brand-500">Active assignments across the 3-person team</p>
+                </div>
+
+                <div className="space-y-3">
+                  {teamWorkload.map((member: any) => (
+                    <div key={member.userId} className="p-3.5 rounded-2xl bg-brand-50 border border-brand-200/60">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-ink-900">{member.name}</span>
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-brand-200 text-brand-700">{member.role}</span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-xs text-brand-600">
+                        <span>{member.activeJobsCount} Active Jobs</span>
+                        <span className="font-extrabold text-brand-900">₹{member.activeValue.toLocaleString("en-IN")}</span>
+                      </div>
+                      {member.lateCount > 0 && (
+                        <div className="mt-1 text-[11px] font-extrabold text-rose">⚠️ {member.lateCount} job running late</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-          </section>
+
+            {/* Customer Lifetime Value Leaderboard */}
+            <section className="rounded-3xl bg-white border border-brand-200 shadow-sm p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-extrabold text-ink-900">Customer Lifetime Value (LTV) Leaderboard</h3>
+                  <p className="text-xs text-brand-500">Instant intelligence on top accounts — no need to phone Abhishek</p>
+                </div>
+                <Link href="/customers" className="text-xs font-bold text-amber-deep hover:underline">
+                  All Customers →
+                </Link>
+              </div>
+
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {customers.map((c: any) => {
+                  const m = getCustomerMetrics(c.id);
+                  return (
+                    <Link
+                      key={c.id}
+                      href={`/customers/${c.id}`}
+                      className="p-4 rounded-2xl bg-brand-50/70 border border-brand-200 hover:border-amber hover:bg-white transition group block"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-sm text-ink-900 group-hover:text-amber-deep transition">{c.name}</span>
+                        {m.isRepeat && (
+                          <span className="text-[10px] font-extrabold bg-emerald-soft text-emerald px-2 py-0.5 rounded-full border border-emerald/20">
+                            Repeat Client
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-brand-500 mt-0.5">{c.company || "Independent"}</p>
+                      <div className="mt-3 pt-3 border-t border-brand-200/60 flex items-center justify-between text-xs">
+                        <span className="text-brand-500">{m.totalOrders} total jobs</span>
+                        <span className="font-extrabold text-brand-950">LTV: ₹{m.totalSpend.toLocaleString("en-IN")}</span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
         )}
 
-        {/* Pipeline Preview */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-extrabold tracking-tight text-ink-900">Pipeline preview</h3>
-            <a href="/jobs" className="text-sm font-bold text-brand-600 hover:text-brand-900 transition">Full view →</a>
+        {/* ------------------------------------------------------------- */}
+        {/* 2. SALES ROLE VIEW (Abhishek)                                 */}
+        {/* ------------------------------------------------------------- */}
+        {user.role === "SALES" && (
+          <div className="space-y-8">
+            {/* Sales KPIs */}
+            <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="rounded-2xl p-5 shadow-sm border bg-amber-soft border-amber/30 text-amber-deep">
+                <div className="text-xs font-bold uppercase tracking-wide">Unquoted Enquiries</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1">
+                  {allJobs.filter((j: any) => j.stage === "ENQUIRY").length}
+                </div>
+                <div className="text-xs font-semibold mt-1.5 opacity-80">Needs quote & clarification</div>
+              </div>
+
+              <div className="rounded-2xl p-5 shadow-sm border bg-brand-900 text-white">
+                <div className="text-xs font-bold uppercase tracking-wide text-brand-300">Quoted Pipeline</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1 text-amber">
+                  ₹{metrics.quotedValue.toLocaleString("en-IN")}
+                </div>
+                <div className="text-xs text-brand-400 mt-1.5">
+                  {allJobs.filter((j: any) => j.stage === "QUOTED").length} deals awaiting approval
+                </div>
+              </div>
+
+              <div className="rounded-2xl p-5 shadow-sm border bg-white border-brand-200">
+                <div className="text-xs font-bold uppercase tracking-wide text-brand-500">Design Sign-Offs</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1 text-ink-900">
+                  {allJobs.filter((j: any) => j.stage === "DESIGN").length}
+                </div>
+                <div className="text-xs text-brand-400 mt-1.5">Client proof approvals pending</div>
+              </div>
+
+              <div className="rounded-2xl p-5 shadow-sm border bg-white border-brand-200">
+                <div className="text-xs font-bold uppercase tracking-wide text-brand-500">Repeat Accounts</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1 text-emerald">
+                  {customers.filter((c: any) => getCustomerMetrics(c.id).isRepeat).length}
+                </div>
+                <div className="text-xs text-brand-400 mt-1.5">1-click re-order enabled</div>
+              </div>
+            </section>
+
+            {/* Quick Actions for Sales: Messy Lead Parser & Follow-up Radar */}
+            <div className="grid lg:grid-cols-2 gap-6">
+              {/* Messy Lead Intake Launcher Card */}
+              <div className="rounded-3xl bg-gradient-to-br from-brand-900 to-brand-950 text-white p-6 md:p-8 shadow-xl shadow-brand-900/10 space-y-4 relative overflow-hidden">
+                <div className="absolute -right-8 -top-8 w-36 h-36 bg-amber/10 rounded-full blur-2xl pointer-events-none" />
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber text-brand-950 font-extrabold text-xs">
+                  ⚡ Sales Power Feature
+                </div>
+                <h3 className="text-2xl font-extrabold tracking-tight">Messy WhatsApp & Chat Ingestion</h3>
+                <p className="text-xs text-brand-300 leading-relaxed max-w-lg">
+                  Turn informal Hindi/English WhatsApp messages, voice note transcripts, or vague client calls into structured jobs with auto-estimated pricing and pre-filled specs.
+                </p>
+                <div className="pt-2 flex flex-wrap gap-3">
+                  <MessyLeadModal />
+                  <RepeatOrderModal customers={customers} />
+                </div>
+              </div>
+
+              {/* Follow-up & Stale Lead Radar */}
+              <div className="rounded-3xl bg-white border border-brand-200 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-extrabold text-ink-900">Leads Needing Follow-up</h3>
+                  <span className="text-xs font-bold bg-amber-soft text-amber-deep px-2.5 py-0.5 rounded-full border border-amber/20">
+                    High Priority
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="p-3.5 rounded-2xl bg-amber-soft/40 border border-amber/20 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <strong className="font-extrabold text-ink-900">Priya Nair (Unconfirmed Enquiry)</strong>
+                      <span className="text-amber-deep font-bold">Needs Specs</span>
+                    </div>
+                    <p className="text-brand-600">Client asked for conference brochures. Quantity and paper finish still missing.</p>
+                    <div className="pt-1 flex gap-2">
+                      <Link href="/customers/3" className="text-xs font-bold text-amber-deep hover:underline">View Client Profile →</Link>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-brand-50 border border-brand-200 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <strong className="font-extrabold text-ink-900">BrightTech Solutions (Repeat Quote)</strong>
+                      <span className="text-emerald font-bold">Quoted: ₹12,600</span>
+                    </div>
+                    <p className="text-brand-600">Same as last time quote prepared. Confirm paper stock and trigger print run.</p>
+                    <div className="pt-1 flex gap-2">
+                      <Link href="/jobs/2" className="text-xs font-bold text-brand-900 hover:underline">View Job #2 →</Link>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* 3. PRODUCTION ROLE VIEW (Siddhant)                            */}
+        {/* ------------------------------------------------------------- */}
+        {user.role === "PRODUCTION" && (
+          <div className="space-y-8">
+            {/* Production KPIs */}
+            <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="rounded-2xl p-5 shadow-sm border bg-brand-950 text-white">
+                <div className="text-xs font-bold uppercase tracking-wide text-brand-300">Jobs in Printing</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1 text-amber">
+                  {allJobs.filter((j: any) => j.stage === "PRINTING").length}
+                </div>
+                <div className="text-xs text-brand-400 mt-1.5">Active on offset / digital presses</div>
+              </div>
+
+              <div className="rounded-2xl p-5 shadow-sm border bg-white border-brand-200">
+                <div className="text-xs font-bold uppercase tracking-wide text-brand-500">Ready for Dispatch</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1 text-emerald">
+                  {allJobs.filter((j: any) => j.stage === "READY").length}
+                </div>
+                <div className="text-xs text-brand-400 mt-1.5">Packaged and QC checked</div>
+              </div>
+
+              <div className={`rounded-2xl p-5 shadow-sm border ${lateJobs.length > 0 ? "bg-rose-soft border-rose/30 text-rose" : "bg-white border-brand-200 text-brand-900"}`}>
+                <div className="text-xs font-bold uppercase tracking-wide opacity-80">Overdue on Floor</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1">{lateJobs.length}</div>
+                <div className="text-xs font-semibold mt-1.5 opacity-80">Requires floor fast-track</div>
+              </div>
+
+              <div className="rounded-2xl p-5 shadow-sm border bg-white border-brand-200">
+                <div className="text-xs font-bold uppercase tracking-wide text-brand-500">In Pre-Press Design</div>
+                <div className="text-3xl font-extrabold tracking-tight mt-1 text-ink-900">
+                  {allJobs.filter((j: any) => j.stage === "DESIGN").length}
+                </div>
+                <div className="text-xs text-brand-400 mt-1.5">Waiting for proof sign-off</div>
+              </div>
+            </section>
+
+            {/* Print Floor Queue & Machine Load */}
+            <div className="grid lg:grid-cols-3 gap-6">
+              {/* Print Queue */}
+              <div className="lg:col-span-2 rounded-3xl bg-white border border-brand-200 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-extrabold text-ink-900">Print Floor Priority Queue</h3>
+                    <p className="text-xs text-brand-500">Machine sequencing sorted by urgency and SLA due date</p>
+                  </div>
+                  <span className="text-xs font-bold text-brand-600 bg-brand-100 px-3 py-1 rounded-full">
+                    Active Floor Load
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {allJobs
+                    .filter((j: any) => j.stage === "PRINTING" || j.stage === "DESIGN" || j.stage === "READY")
+                    .map((j: any) => {
+                      const cust = customerMap.get(j.customer_id);
+                      return (
+                        <div
+                          key={j.id}
+                          className={`p-4 rounded-2xl border transition flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+                            j.is_late
+                              ? "border-rose bg-rose-soft/40"
+                              : j.priority === "urgent"
+                              ? "border-amber bg-amber-soft/30"
+                              : "border-brand-200 bg-brand-50/50"
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-extrabold text-sm text-ink-900">Job #{j.id}: {j.title}</span>
+                              {j.is_late && (
+                                <span className="text-[10px] bg-rose text-white px-2 py-0.5 rounded-full font-extrabold">
+                                  OVERDUE
+                                </span>
+                              )}
+                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${j.priority === "urgent" ? "bg-rose/10 text-rose" : "bg-brand-200 text-brand-700"}`}>
+                                {j.priority.toUpperCase()}
+                              </span>
+                            </div>
+                            <p className="text-xs text-brand-600 mt-1">Client: {cust?.name} ({cust?.company || "Independent"})</p>
+                            <p className="text-[11px] text-brand-500 mt-0.5">Due: {j.due_date ? j.due_date.split("T")[0] : "No date"} • {j.notes || "No special notes"}</p>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Link
+                              href={`/jobs/${j.id}`}
+                              className="px-3 py-1.5 rounded-xl bg-brand-900 hover:bg-brand-800 text-white text-xs font-bold transition shadow-sm"
+                            >
+                              Open Work Order →
+                            </Link>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Machine & Paper Stock Status Panel */}
+              <div className="rounded-3xl bg-white border border-brand-200 shadow-sm p-6 space-y-4">
+                <div>
+                  <h3 className="text-lg font-extrabold text-ink-900">Paper & Machine Alerts</h3>
+                  <p className="text-xs text-brand-500">Hardware dependencies & raw stock status</p>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div className="p-3.5 rounded-2xl bg-rose-soft border border-rose/20 text-rose space-y-1">
+                    <strong className="font-bold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-rose" />
+                      Paper Stock Delay (Job #7)
+                    </strong>
+                    <p className="text-brand-700 text-[11px]">Premium foil cardstock delivery delayed from supplier. Expected arrival today 11:00 AM.</p>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-amber-soft border border-amber/20 text-amber-deep space-y-1">
+                    <strong className="font-bold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber" />
+                      Lamination Machine Queue (Job #6)
+                    </strong>
+                    <p className="text-brand-700 text-[11px]">Vihaan Interiors A1 posters require heavy matte thermal lamination after printing.</p>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-emerald-soft border border-emerald/20 text-emerald space-y-1">
+                    <strong className="font-bold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald" />
+                      300gsm Art Card Stock: OK
+                    </strong>
+                    <p className="text-brand-700 text-[11px]">Sufficient inventory for BrightTech repeat run.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* Pipeline Stage Distribution (Universal for all roles)         */}
+        {/* ------------------------------------------------------------- */}
+        <section className="space-y-4 pt-4 border-t border-brand-200/80">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xl font-extrabold tracking-tight text-ink-900">Pipeline Stage Overview</h3>
+              <p className="text-xs text-brand-500">Live summary of jobs moving across production stages</p>
+            </div>
+            <Link href="/jobs" className="text-xs font-bold text-amber-deep hover:underline">
+              Full Kanban Board →
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             {stageOrder.map((stage) => {
               const stageData = stages.find((s: any) => s.stage === stage);
               const count = stageData?.count || 0;
+              const stageJobs = allJobs.filter((j: any) => j.stage === stage);
+              const totalStageQuote = stageJobs.reduce((s: number, j: any) => s + (j.quote_amount || 0), 0);
+
               return (
-                <div key={stage} className={`rounded-2xl border p-5 shadow-sm transition hover:shadow-md ${stageColors[stage]}`}>
-                  <div className="text-xs font-extrabold uppercase tracking-wider opacity-70">{stageLabels[stage]}</div>
-                  <div className="text-3xl font-extrabold tracking-tighter mt-1">{count}</div>
-                  <div className="mt-3 space-y-2">
-                    {getJobs({ stage }).slice(0, 3).map((j: any) => (
-                      <a key={j.id} href={`/jobs/${j.id}`} className={`block rounded-lg px-3 py-2 text-xs font-semibold leading-snug shadow-sm ${stage === "DESIGN" ? "bg-white/10 hover:bg-white/20" : stage === "PRINTING" ? "bg-white/10 hover:bg-white/20" : stage === "ENQUIRY" ? "bg-amber-soft/60 hover:bg-amber-soft" : "bg-brand-50/60 hover:bg-brand-50"} transition`}>
-                        <div className="truncate">{j.title}</div>
-                        <div className={`text-[10px] font-bold mt-0.5 ${stage === "DESIGN" ? "text-rose/80" : stage === "ENQUIRY" ? "text-amber-deep/70" : "text-brand-500"}`}>{j.assigned_to ? "Assigned" : "Unassigned"}</div>
-                      </a>
+                <div key={stage} className={`rounded-2xl border p-4 shadow-sm transition hover:shadow-md ${stageColors[stage]}`}>
+                  <div className="text-[11px] font-extrabold uppercase tracking-wider opacity-75">{stageLabels[stage]}</div>
+                  <div className="text-2xl font-black tracking-tight mt-1">{count}</div>
+                  <div className="text-[11px] font-bold opacity-80 mt-0.5">₹{totalStageQuote.toLocaleString("en-IN")}</div>
+
+                  <div className="mt-3 space-y-1.5">
+                    {stageJobs.slice(0, 2).map((j: any) => (
+                      <Link
+                        key={j.id}
+                        href={`/jobs/${j.id}`}
+                        className={`block rounded-lg px-2.5 py-1.5 text-[11px] font-semibold leading-snug shadow-2xs transition truncate ${
+                          stage === "PRINTING"
+                            ? "bg-white/10 hover:bg-white/20 text-white"
+                            : stage === "DESIGN"
+                            ? "bg-rose-soft/80 hover:bg-rose-soft text-rose"
+                            : "bg-white/80 hover:bg-white text-ink-900"
+                        }`}
+                      >
+                        {j.title}
+                      </Link>
                     ))}
+                    {count > 2 && (
+                      <div className="text-[10px] font-bold opacity-60 text-center pt-0.5">
+                        +{count - 2} more
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
         </section>
-
-        {/* Bottom: quick info + AI widget */}
-        <section className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 rounded-3xl bg-white border border-brand-200/60 shadow-sm p-6 md:p-8">
-            <h3 className="text-xl font-extrabold tracking-tight text-ink-900 mb-4">Quick insight</h3>
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div className="rounded-xl bg-brand-50 border border-brand-200/60 p-5">
-                <h4 className="font-extrabold text-brand-900">Repeat order ready</h4>
-                <p className="text-sm text-brand-600 mt-1">BrightTech Solutions called asking for the same order as last month (500 cards + 50 brochures). Design already approved.</p>
-                <a href="/jobs" className="inline-block mt-3 text-xs font-extrabold text-amber-deep hover:underline">See quoted job →</a>
-              </div>
-              <div className="rounded-xl bg-brand-50 border border-brand-200/60 p-5">
-                <h4 className="font-extrabold text-brand-900">Messy new enquiry</h4>
-                <p className="text-sm text-brand-600 mt-1">Priya Nair called from an unknown number about "brochures for a conference." Unclear quantity or deadline — needs follow-up.</p>
-                <a href="/customers/3" className="inline-block mt-3 text-xs font-extrabold text-amber-deep hover:underline">Customer profile →</a>
-              </div>
-            </div>
-          </div>
-          <div className="rounded-3xl bg-gradient-to-br from-brand-900 to-brand-800 text-white p-6 md:p-8 shadow-xl shadow-brand-900/20 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/3" />
-            <h3 className="text-xl font-extrabold tracking-tight relative">Shyft Assistant</h3>
-            <p className="text-brand-300 text-sm mt-2 relative">Ask me in natural language. Try: <span className="text-white font-semibold">"What did Neha order last time?"</span></p>
-            <ul className="mt-4 space-y-2 text-sm relative">
-              {["Pipeline summary", "Late jobs", "Customer history", "Job status #7"].map(t => (
-                <li key={t} className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-amber" />{t}</li>
-              ))}
-            </ul>
-          </div>
-        </section>
       </main>
 
-      <AssistantWidget />
+      {/* Floating AI Copilot Widget */}
+      <AssistantWidget role={user.role} />
     </div>
   );
 }

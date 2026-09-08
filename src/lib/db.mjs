@@ -82,6 +82,29 @@ function initDB() {
     CREATE INDEX IF NOT EXISTS idx_activities_customer ON activities(customer_id);
   `);
   db.exec(`CREATE TRIGGER IF NOT EXISTS trg_jobs_updated_at AFTER UPDATE ON jobs BEGIN UPDATE jobs SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id; END;`);
+
+  // Safe schema enhancements
+  try {
+    const jobColumns = db.prepare("PRAGMA table_info(jobs)").all().map(c => c.name);
+    if (!jobColumns.includes("checklist")) {
+      db.exec("ALTER TABLE jobs ADD COLUMN checklist TEXT;");
+    }
+    if (!jobColumns.includes("lead_source")) {
+      db.exec("ALTER TABLE jobs ADD COLUMN lead_source TEXT DEFAULT 'Direct';");
+    }
+    if (!jobColumns.includes("specs_summary")) {
+      db.exec("ALTER TABLE jobs ADD COLUMN specs_summary TEXT;");
+    }
+    if (!jobColumns.includes("risk_score")) {
+      db.exec("ALTER TABLE jobs ADD COLUMN risk_score TEXT DEFAULT 'LOW';");
+    }
+    if (!jobColumns.includes("risk_reason")) {
+      db.exec("ALTER TABLE jobs ADD COLUMN risk_reason TEXT;");
+    }
+  } catch (err) {
+    // Column might already exist
+  }
+
   return db;
 }
 
@@ -106,6 +129,12 @@ export function getCustomers() {
 
 export function getCustomerById(id) {
   return db.prepare("SELECT * FROM customers WHERE id = ?").get(id);
+}
+
+export function createCustomer(data) {
+  const stmt = db.prepare("INSERT INTO customers (name, company, phone, email, notes) VALUES (?, ?, ?, ?, ?)");
+  const res = stmt.run(data.name, data.company || null, data.phone || null, data.email || null, data.notes || null);
+  return res.lastInsertRowid;
 }
 
 export function getJobs(filters) {
@@ -140,12 +169,25 @@ export function getCustomerJobs(customerId) {
 
 export function createJob(data) {
   const stmt = db.prepare(`
-    INSERT INTO jobs (title, description, stage, assigned_to, customer_id, quote_amount, due_date, priority, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO jobs (title, description, stage, assigned_to, customer_id, quote_amount, due_date, priority, notes, is_late, lead_source, specs_summary, checklist, risk_score, risk_reason)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const res = stmt.run(
-    data.title, data.description || "", data.stage || "ENQUIRY", data.assignedTo || null,
-    data.customerId, data.quoteAmount || null, data.dueDate || null, data.priority || "normal", data.notes || ""
+    data.title,
+    data.description || "",
+    data.stage || "ENQUIRY",
+    data.assignedTo || null,
+    data.customerId,
+    data.quoteAmount || null,
+    data.dueDate || null,
+    data.priority || "normal",
+    data.notes || "",
+    data.isLate ? 1 : 0,
+    data.leadSource || "Direct",
+    data.specsSummary || null,
+    data.checklist || null,
+    data.riskScore || "LOW",
+    data.riskReason || null
   );
   return res.lastInsertRowid;
 }
@@ -176,4 +218,108 @@ export function getLateJobs() {
 
 export function getStageCounts() {
   return db.prepare("SELECT stage, COUNT(*) as count FROM jobs GROUP BY stage").all();
+}
+
+export function getDefaultChecklist(stage, title = "", description = "") {
+  const stageOrder = ["ENQUIRY", "QUOTED", "DESIGN", "PRINTING", "READY", "DELIVERED"];
+  const stageIdx = stageOrder.indexOf(stage);
+
+  return [
+    { id: "art", label: "Vector Artwork & High-Res PDF Verified", done: stageIdx >= 2 },
+    { id: "stock", label: "Paper Stock Reserved (300gsm / Glossy / Matte)", done: stageIdx >= 3 },
+    { id: "proof", label: "Digital Proof Signed Off by Client", done: stageIdx >= 3 },
+    { id: "print", label: "Offset / Digital Print Run Completed", done: stageIdx >= 4 },
+    { id: "finish", label: "Lamination, Die-cut & Creasing Finished", done: stageIdx >= 4 },
+    { id: "qc", label: "Final Quality Check & Bundled for Delivery", done: stageIdx >= 5 },
+  ];
+}
+
+export function getJobChecklist(job) {
+  if (job.checklist) {
+    try {
+      return JSON.parse(job.checklist);
+    } catch {
+      // fallback
+    }
+  }
+  return getDefaultChecklist(job.stage, job.title, job.description);
+}
+
+export function getPipelineMetrics() {
+  const allJobs = getJobs();
+  const activeJobs = allJobs.filter(j => j.stage !== "DELIVERED");
+  const deliveredJobs = allJobs.filter(j => j.stage === "DELIVERED");
+  const lateJobs = getLateJobs();
+
+  const pipelineValue = activeJobs.reduce((sum, j) => sum + (j.quote_amount || 0), 0);
+  const realizedRevenue = deliveredJobs.reduce((sum, j) => sum + (j.quote_amount || 0), 0);
+  const lateRevenue = lateJobs.reduce((sum, j) => sum + (j.quote_amount || 0), 0);
+  const quotedValue = allJobs.filter(j => j.stage === "QUOTED").reduce((sum, j) => sum + (j.quote_amount || 0), 0);
+
+  const stageRevenue = {
+    ENQUIRY: allJobs.filter(j => j.stage === "ENQUIRY").reduce((s, j) => s + (j.quote_amount || 0), 0),
+    QUOTED: quotedValue,
+    DESIGN: allJobs.filter(j => j.stage === "DESIGN").reduce((s, j) => s + (j.quote_amount || 0), 0),
+    PRINTING: allJobs.filter(j => j.stage === "PRINTING").reduce((s, j) => s + (j.quote_amount || 0), 0),
+    READY: allJobs.filter(j => j.stage === "READY").reduce((s, j) => s + (j.quote_amount || 0), 0),
+    DELIVERED: realizedRevenue,
+  };
+
+  return {
+    totalJobsCount: allJobs.length,
+    activeJobsCount: activeJobs.length,
+    deliveredJobsCount: deliveredJobs.length,
+    lateJobsCount: lateJobs.length,
+    pipelineValue,
+    realizedRevenue,
+    lateRevenue,
+    quotedValue,
+    averageTicketSize: activeJobs.length > 0 ? Math.round(pipelineValue / activeJobs.length) : 0,
+    stageRevenue,
+  };
+}
+
+export function getTeamWorkload() {
+  const users = getAllUsers();
+  const allJobs = getJobs();
+
+  return users.map(user => {
+    const assignedJobs = allJobs.filter(j => j.assigned_to === user.id && j.stage !== "DELIVERED");
+    const activeValue = assignedJobs.reduce((s, j) => s + (j.quote_amount || 0), 0);
+    const lateCount = assignedJobs.filter(j => j.is_late || (j.due_date && new Date(j.due_date) < new Date())).length;
+
+    return {
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      activeJobsCount: assignedJobs.length,
+      activeValue,
+      lateCount,
+      stages: {
+        enquiry: assignedJobs.filter(j => j.stage === "ENQUIRY").length,
+        quoted: assignedJobs.filter(j => j.stage === "QUOTED").length,
+        design: assignedJobs.filter(j => j.stage === "DESIGN").length,
+        printing: assignedJobs.filter(j => j.stage === "PRINTING").length,
+        ready: assignedJobs.filter(j => j.stage === "READY").length,
+      }
+    };
+  });
+}
+
+export function getCustomerMetrics(customerId) {
+  const jobs = getCustomerJobs(customerId);
+  const totalSpend = jobs.reduce((s, j) => s + (j.quote_amount || 0), 0);
+  const delivered = jobs.filter(j => j.stage === "DELIVERED");
+  const repeatCount = jobs.length;
+  const isRepeat = repeatCount > 1;
+
+  return {
+    totalOrders: jobs.length,
+    deliveredOrders: delivered.length,
+    totalSpend,
+    averageOrderValue: jobs.length > 0 ? Math.round(totalSpend / jobs.length) : 0,
+    isRepeat,
+    lastOrder: jobs[0] || null
+  };
 }
