@@ -19,7 +19,7 @@ import MessyLeadModal from "@/components/MessyLeadModal";
 import RepeatOrderModal from "@/components/RepeatOrderModal";
 
 export default async function DashboardPage() {
-  const c = cookies();
+  const c = await cookies();
   const session = c.get("shyft_session")?.value;
   if (!session) redirect("/login");
   const user = getUserByEmail(session);

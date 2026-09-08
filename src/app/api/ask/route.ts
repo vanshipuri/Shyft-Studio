@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     const { q, role } = await req.json();
     const query = String(q || "").trim();
 
-    const c = cookies();
+    const c = await cookies();
     const session = c.get("shyft_session")?.value;
     const user = session ? getUserByEmail(session) : null;
     const activeRole = role || user?.role || "OWNER";

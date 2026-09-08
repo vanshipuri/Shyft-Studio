@@ -15,14 +15,15 @@ import RepeatOrderModal from "@/components/RepeatOrderModal";
 import MessyLeadModal from "@/components/MessyLeadModal";
 import AssistantWidget from "@/components/AssistantWidget";
 
-export default async function CustomerDetailPage({ params }: { params: { id: string } }) {
-  const c = cookies();
+export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const c = await cookies();
   const session = c.get("shyft_session")?.value;
   if (!session) redirect("/login");
   const user = getUserByEmail(session);
   if (!user) redirect("/login");
 
-  const customerId = parseInt(params.id, 10);
+  const customerId = parseInt(id, 10);
   const customer = getCustomerById(customerId);
   if (!customer) redirect("/customers");
 

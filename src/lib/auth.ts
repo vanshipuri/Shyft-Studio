@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { getUserByEmail } from "@/lib/db.mjs";
 
 export async function getSession() {
-  const c = cookies();
+  const c = await cookies();
   const session = c.get("shyft_session")?.value;
   if (!session) return null;
   try {

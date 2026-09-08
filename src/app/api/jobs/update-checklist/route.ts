@@ -4,7 +4,7 @@ import { getUserByEmail, getJobById, updateJob, addActivity } from "@/lib/db.mjs
 
 export async function POST(req: NextRequest) {
   try {
-    const c = cookies();
+    const c = await cookies();
     const session = c.get("shyft_session")?.value;
     const user = session ? getUserByEmail(session) : null;
 

@@ -6,7 +6,7 @@ import { resolveStageOwner } from "@/lib/pipeline.mjs";
 
 export async function POST(req: NextRequest) {
   try {
-    const c = cookies();
+    const c = await cookies();
     const session = c.get("shyft_session")?.value;
     const currentUser = session ? getUserByEmail(session) : null;
 
