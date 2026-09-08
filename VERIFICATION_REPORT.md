@@ -1,6 +1,6 @@
 # Shyft Studio — Claim Verification Report (re-run 8 Sep 2026)
 
-**Branch:** `arena/01a08154-shyft-studio` · **Method:** every line below was produced by
+**Branch:** `arena/01a081a8-shyft-studio` · **Method:** every line below was produced by
 running a command in this repo this session. Nothing is restated from the pitch without
 being re-measured.
 
@@ -10,13 +10,13 @@ being re-measured.
 
 | Claim | Command | Actual result | Verdict |
 |---|---|---|---|
-| Test suites green | `npm test` | `# tests 19 · # pass 19 · # fail 0` (11 engine/data-model + 8 LLM-seam) | ✅ |
+| Test suites green | `npm test` | `# tests 21 · # pass 21 · # fail 0` (13 engine/data-model + 8 LLM-seam) | ✅ |
 | Intake eval clean | `npm run eval` | `OVERALL 100.0% (62/62 field assertions) · Cases: 16 · failures: 0` | ✅ |
 | Eval gate has teeth | `npm run eval` with the forward-quantity scan disabled | exit **1**, `Extraction quality regressed: Quantities 15/16, overall 98.4%` | ✅ |
 | Production build clean | `npm run build` | Next.js 16.3.4 (Turbopack), all 19 routes compile, 0 TS errors | ✅ |
 | No known vulnerabilities | `npm audit` | `found 0 vulnerabilities` (was 1 critical + 1 high on Next 14.2.0) | ✅ |
 | Deploy/proxy smoke green | `TEST_BASE_URL=http://127.0.0.1:3000 npm run test:deploy` | `# pass 6 · # fail 0` | ✅ |
-| All routes serve all roles | cookie session + GET `/dashboard /jobs /customers /customers/1 /jobs/1 /jobs/7` × samyak, abhishek, siddhant | **21/21 `200`**, no error markers in HTML | ✅ |
+| All routes serve all roles | cookie session + GET `/dashboard /jobs /customers /customers/1 /jobs/1 /jobs/7` × samyak, abhishek, siddhant | **18/18 `200`**, no error markers in HTML | ✅ |
 
 ## 2. Seed data (idempotency, measured)
 
@@ -97,13 +97,46 @@ the only way to reach zero. Migration changes, all verified by the suites above:
   rather than ported, because `better-sqlite3`/`fs`/`path` are only imported by server
   code. `next.config.js` now sets `turbopack: {}`.
 
-## 7. Reproduce
+## 7. Pre-submission audit (8 Sep, final pass)
+
+Re-running the three brief scenarios against a live local build turned up three defects that
+the suite had not been covering, because they are *routing and labelling* gaps rather than
+crashes. All three are fixed and each now has a regression test (`npm test` 19 → 21).
+
+| Finding | How it surfaced | Fix | Guard |
+|---|---|---|---|
+| **`.env` was committed** | `git ls-files \| grep env` during the "no secrets in repo" checklist item | Untracked (`git rm --cached`) + `.gitignore` now covers `.env*`; `.env.example` remains the reference. Contents were only `DATABASE_URL="file:./dev.db"` — no credential ever committed | — |
+| **Copilot missed "what should Abhishek work on today"** | Pasting natural phrasings into `/api/ask`; it returned the generic help menu, which reads as "the AI failed" | `BRIEFING_INTENT` pattern widened (plate / priorities / work on / needs attention, third-person names), plus the named teammate selects *their* lens | `features.test.mjs` asserts 5 phrasings route to the briefing **and** that late-jobs / revenue still route to their own intents |
+| **"matte" silently dropped for brochure-class jobs** | Feeding *500 flyers a5 matte*; output said `170gsm Gloss Art Paper` — the cards branch honoured `matte`, the brochure branch did not | Brochure branch now reads the stated finish. **Label only**: `BROCHURE_RATES` has no matte tier, so price is deliberately unchanged rather than inventing a surcharge. Unpriced `double sided` is pushed to `missingInfo` | `features.test.mjs` asserts matte≠gloss label, matte price == gloss price, duplex flagged, and no false positive without duplex |
+
+Measured after the fixes:
+
+```
+npm test            # 21/21 (13 features + 8 LLM-seam)
+npm run eval        # 62/62 · Cases: 16 · failures: 0     (unchanged — no price drift)
+npm run build       # 19 routes, 0 TS errors
+npm audit           # found 0 vulnerabilities
+npm run seed ×2     # 3 users · 12 customers · 27 jobs · 5 notes · 30 activities (both runs)
+test:deploy         # 6/6 against 127.0.0.1:3000
+routes × roles      # 18/18 HTTP 200, no error markers
+/api/ai/parse-lead  # "500 flyers a5 matte double sided" → 170gsm Matte Art Paper, ₹7,000,
+                    #   + "Double-sided / duplex printing mentioned — not in the standard
+                    #     rate card, confirm before quoting"
+unauthenticated /dashboard → 307 /login
+```
+
+The eval staying at exactly 62/62 after a parser change is the point of having it: it
+proves the finish fix relabelled without moving a single quote.
+
+---
+
+## 8. Reproduce
 
 ```bash
 npm ci --include=dev
 npm run build          # 19 routes, Next.js 16 Turbopack
 npm start              # 0.0.0.0:3000
-npm test               # 19/19
+npm test               # 21/21
 npm run eval           # 62/62, exits 1 on regression
 TEST_BASE_URL=http://127.0.0.1:3000 npm run test:deploy   # 6/6 (server running)
 npm audit              # 0 vulnerabilities

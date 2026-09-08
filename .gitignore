@@ -2,3 +2,9 @@ node_modules/
 .next/
 *.log
 *.tsbuildinfo
+
+# Local env overrides — never commit real credentials.
+# .env.example is the committed reference; everything is optional.
+.env
+.env.local
+.env.*.local

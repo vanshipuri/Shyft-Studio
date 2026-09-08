@@ -153,3 +153,65 @@ test("copilot answers re-engagement, briefing and customer-history queries", () 
   assert.match(unquoted.answer, /Unquoted Enquiries/i);
   assert.match(unquoted.answer, /Priya Nair/);
 });
+
+// Two gaps found while re-running the brief scenarios by hand after the UI pass.
+// Both are "the demo looks broken to a recruiter" bugs rather than crashes, which
+// is exactly the class of defect unit tests on happy paths miss.
+
+test("copilot routes natural phrasings of 'what needs me today' to the briefing", () => {
+  // Each of these used to fall through to the generic help menu.
+  for (const q of [
+    "what should Abhishek work on today",
+    "what should I work on",
+    "what's on my plate",
+    "my priorities",
+    "what needs my attention",
+  ]) {
+    assert.match(
+      processCopilotQuery(q, "OWNER").answer,
+      /Daily Briefing/i,
+      `expected a briefing for: "${q}"`
+    );
+  }
+
+  // ...without stealing turns from the narrower intents that overlap these words.
+  assert.doesNotMatch(processCopilotQuery("which jobs are late", "OWNER").answer, /Daily Briefing/i);
+  assert.match(processCopilotQuery("which jobs are late", "OWNER").answer, /Late \/ At-Risk Jobs/i);
+  assert.match(processCopilotQuery("how much revenue this month", "OWNER").answer, /Pipeline Summary/i);
+
+  // Asking about a named teammate borrows that teammate's lens, even when the
+  // owner is the one logged in.
+  const prod = processCopilotQuery("what should Siddhant work on today", "OWNER").answer;
+  const sales = processCopilotQuery("what should Abhishek work on today", "OWNER").answer;
+  assert.notEqual(prod, sales, "production and sales lenses must not return the same brief");
+  assert.match(prod, /press|finishing|dispatch/i);
+});
+
+test("intake parser keeps a stated finish and flags specs the rate card cannot price", () => {
+  // "matte" was previously dropped for brochure-class jobs: the client was quoted
+  // gloss and nothing flagged it.
+  const matte = parseMessyLead("need 500 flyers a5 matte double sided by friday");
+  assert.match(matte.items[0].paper, /Matte/i);
+
+  // Finish is a label, not an invented surcharge: same rate as the gloss default.
+  const gloss = parseMessyLead("need 500 flyers a5 gloss by friday");
+  assert.match(gloss.items[0].paper, /Gloss/i);
+  assert.equal(
+    matte.items[0].estimatedPrice,
+    gloss.items[0].estimatedPrice,
+    "matte and gloss brochures are not priced differently in the rate card"
+  );
+
+  // Double-sided has no rate tier, so it must be pushed to a human, not silently
+  // priced as single-sided.
+  assert.match(
+    matte.missingInfo.join(" "),
+    /double-sided|duplex/i,
+    "unpriced duplex must be surfaced for confirmation"
+  );
+  assert.doesNotMatch(
+    parseMessyLead("need 500 flyers a5 by friday").missingInfo.join(" "),
+    /double-sided|duplex/i,
+    "no false positive when duplex was never mentioned"
+  );
+});

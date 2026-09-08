@@ -14,7 +14,8 @@
     "eval": "node tests/eval-intake.mjs",
     "test:deploy": "node --test tests/render.test.mjs",
     "db:push": "prisma db push",
-    "db:seed": "node src/scripts/seed.js"
+    "db:seed": "node src/scripts/seed.js",
+    "seed": "node src/scripts/seed.js"
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",

@@ -4,15 +4,30 @@
 spreadsheets for a 3-person print shop — every job has a stage, exactly one owner, and a
 paper trail.*
 
-**Assignment:** AI Engineer Intern · **Candidate:** Vanshi (simulated submission) ·
-**Date:** 8 Sep 2026
+**Assignment:** AI Engineer Intern · **Candidate:** Vanshi · **Date:** 8 Sep 2026
+
+## 🔗 Live demo — no setup required
+
+**→ https://shyft-studio-dfc3.onrender.com** (you'll land on the login screen; use the
+one-click role buttons)
+
+| Sign in as | Email | Password | Lens |
+|---|---|---|---|
+| 👑 Samyak Mehta | `samyak@shyft.studio` | `password123` | Owner — KPIs, risk radar, daily briefing |
+| 💼 Abhishek Rao | `abhishek@shyft.studio` | `password123` | Sales — messy intake, quotes, repeat orders |
+| ⚙️ Siddhant Yadav | `siddhant@shyft.studio` | `password123` | Production — press queue, pre-flight, SLA |
+
+Demo data is pre-loaded (12 customers, 27 jobs across every stage, notes + audit trail).
+The Persona Switcher in the top bar lets you hop between all three lenses without logging
+out. It's a free Render instance, so the first request after idling can take ~50s to cold
+start — that's the platform sleeping, not the app hanging.
 
 ![CI](https://github.com/vanshipuri/Shyft-Studio/actions/workflows/ci.yml/badge.svg)
-![tests](https://img.shields.io/badge/tests-19%2F19%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-21%2F21%20passing-brightgreen)
 ![eval](https://img.shields.io/badge/intake__eval-62%2F62%20assertions-brightgreen)
 ![audit](https://img.shields.io/badge/npm%20audit-0%20vulnerabilities-brightgreen)
 
-**Status:** Complete — 19/19 tests (engine, data model, LLM seam), 62/62 intake-eval
+**Status:** Complete — 21/21 tests (engine, data model, LLM seam), 62/62 intake-eval
 assertions, 6/6 deploy smoke tests, 19 routes building clean on Next.js 16.
 
 > What Samyak's team actually said, and the system requirement each quote becomes:
@@ -207,7 +222,7 @@ knowing where things stand — collapsed into one screen.
 npm ci --include=dev
 npm run build        # 19 routes compile clean (Next.js 16 / Turbopack)
 npm start            # http://localhost:3000 (or: npm run dev)
-npm test             # 19/19 — engine + data model + LLM provider seam
+npm test             # 21/21 — engine + data model + LLM provider seam
 npm run eval         # 62/62 intake-extraction assertions (exits 1 on regression)
 npm run test:deploy  # 6/6 — requires the server running (TEST_BASE_URL override supported)
 ```
@@ -215,6 +230,10 @@ npm run test:deploy  # 6/6 — requires the server running (TEST_BASE_URL overri
 Optional: `cp .env.example .env` — every variable is optional. Setting
 `SHYFT_LLM_API_KEY` switches intake enrichment from the rules engine to a live
 OpenAI-compatible provider; unset, the app never touches the network.
+
+**No secrets are committed.** `.env` is git-ignored and `.env.example` is the only env file
+in the tree; the LLM key is read from the environment at runtime and is never stored in the
+repo, the database, or the Render blueprint.
 
 **Demo credentials (all password `password123`):** `samyak@shyft.studio` (Owner) ·
 `abhishek@shyft.studio` (Sales) · `siddhant@shyft.studio` (Production).
@@ -228,8 +247,14 @@ a Check-in" (Meera Shah / Urban Nest). On the Owner dashboard, read the **Daily 
 
 ### Repopulate the demo database (optional — resets all data)
 ```bash
-rm -f db.sqlite && npm run db:seed
+npm run seed        # == npm run db:seed; idempotent, safe to re-run
+# `rm -f db.sqlite && npm run seed` for a hard reset from empty
 ```
+The seed script creates the schema and loads 3 users / 12 customers / 27 jobs / notes /
+audit-trail activities, so a fresh clone works with no manual data entry. Re-running it is
+a no-op on counts (verified: 3/12/27/5/30 before and after two consecutive runs) — it
+upserts by natural key instead of duplicating, which is what makes it usable as a
+boot-time step too.
 
 ---
 
@@ -303,6 +328,19 @@ Cards — using a default, confirm with the client`) rather than being quoted si
   implemented, tested with a mock provider, and wired into `/api/ai/parse-lead`, but ships
   unconfigured. Set `SHYFT_LLM_API_KEY` to use it; unset, the deterministic engine does all
   the work and nothing calls the network. No key is committed, deliberately.
+- **The intake parser reads specs from the whole message, not per line item.** A message
+  containing both cards and brochures applies one stock mention to both branches. Fixing it
+  properly means segmenting the message by clause before extraction (~1 day of work, and it
+  would need the eval re-labelled per segment), so it is flagged here rather than half-done.
+  The human-in-the-loop confirm step is what protects the price, which is why it exists.
+- **Finish affects the label, not the quote.** A client who says "matte" now gets
+  `170gsm Matte Art Paper` instead of being silently quoted gloss, but `BROCHURE_RATES` has
+  no matte/duplex tier — so those specs are pushed to `missingInfo` for a human to price
+  rather than invented by the parser. Fabricating a surcharge would be worse than under-quoting.
+- **SQLite writes are ephemeral on Render's free plan** — the disk is reset on redeploy and
+  restarts, so the live demo always boots from the committed `db.sqlite`. Data created in the
+  live UI does not persist; for a durable demo the same code runs unchanged against
+  `DB_PATH` on a persistent volume or Postgres.
 
 ---
 
