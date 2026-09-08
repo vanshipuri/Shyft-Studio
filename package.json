@@ -9,6 +9,8 @@
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
+    "test": "node --test tests/features.test.mjs",
+    "test:features": "node --test tests/features.test.mjs",
     "test:deploy": "node --test tests/render.test.mjs",
     "db:push": "prisma db push",
     "db:seed": "node src/scripts/seed.js"
