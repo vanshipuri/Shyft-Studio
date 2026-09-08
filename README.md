@@ -79,7 +79,7 @@ Rather than locking everyone into an identical static view, **Shyft Studio** pro
 | **Database** | SQLite via `better-sqlite3` | Zero-latency, in-process, relational integrity with foreign keys, no external database dependencies. |
 | **Styling** | Tailwind CSS + custom theme | Consistent design system, high-contrast role badges, responsive grid for Kanban and data tables. |
 | **Auth** | Cookie session (`shyft_session`) + Instant Persona Switcher | Allows recruiters and team members to switch between Samyak, Abhishek, and Siddhant in 1 click. |
-| **AI / NLP** | Domain-specific Heuristic & Parser Engine (`ai-engine.mjs`) | Deterministic, ultra-fast (<15ms response time), zero external API key requirements in sandbox, with clean adapter pattern for LLM swap. |
+| **AI / NLP** | Domain-specific Heuristic & Parser Engine (`ai-engine.mjs`) | Deterministic, ultra-fast (0.2–1.4 ms warm), 100% offline with zero external API keys. The engine exposes exactly four pure functions (`parseMessyLead`, `generateRepeatOrderPackage`, `analyzeProductionRisks`, `processCopilotQuery`), which is the seam an LLM provider would sit behind — **no provider adapter is wired up yet**; swapping in Claude/OpenAI is a roadmap step, not shipped code. |
 
 ---
 

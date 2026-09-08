@@ -2,6 +2,7 @@
 // Handles messy WhatsApp lead ingestion, repeat order intelligence, production risk analysis, and natural language copilot reasoning.
 
 import { db, getCustomers, getJobs, getLateJobs, getStageCounts, getCustomerJobs, getJobById, getCustomerById } from "./db.mjs";
+import { repriceItem } from "./pricing.mjs";
 
 /**
  * Parses unstructured/messy lead text (WhatsApp messages, voice note transcripts, rough emails).
@@ -96,28 +97,17 @@ export function parseMessyLead(rawText) {
     else if (/matte/i.test(lower)) paper = "300gsm Matte";
 
     let finish = "Standard Matte";
-    let unitRate = 2.5;
     if (/gold\s*foil|foil\s*stamp|emboss/i.test(lower)) {
       finish = "Gold Foil Stamping + Emboss";
-      unitRate = 5.0;
     } else if (/glossy|gloss/i.test(lower)) {
       finish = "Gloss Lamination";
-      unitRate = 2.8;
     } else if (/velvet/i.test(lower)) {
       finish = "Velvet Touch Lamination";
-      unitRate = 4.0;
     }
 
-    const price = Math.round(qty * unitRate);
-    estimatedTotal += price;
-    items.push({
-      type: "Visiting Cards",
-      quantity: qty,
-      paper,
-      finish,
-      unitRate,
-      estimatedPrice: price
-    });
+    const priced = repriceItem({ type: "Visiting Cards", quantity: qty, paper, finish });
+    estimatedTotal += priced.estimatedPrice;
+    items.push(priced);
   }
 
   // Brochures
@@ -137,25 +127,13 @@ export function parseMessyLead(rawText) {
     else if (/multi\s*page|catalog/i.test(lower)) fold = "8-Page Catalog";
 
     let paper = "170gsm Gloss Art Paper";
-    let unitRate = 18;
     if (/300\s*gsm|cover/i.test(lower)) {
       paper = "250gsm Cover / 130gsm Inner";
-      unitRate = 26;
     }
 
-    if (qty >= 1000) unitRate = Math.round(unitRate * 0.65);
-    else if (qty >= 500) unitRate = Math.round(unitRate * 0.8);
-
-    const price = Math.round(qty * unitRate);
-    estimatedTotal += price;
-    items.push({
-      type: "Brochures",
-      quantity: qty,
-      fold,
-      paper,
-      unitRate,
-      estimatedPrice: price
-    });
+    const priced = repriceItem({ type: "Brochures", quantity: qty, fold, paper });
+    estimatedTotal += priced.estimatedPrice;
+    items.push(priced);
   }
 
   // Posters / Banners
@@ -168,15 +146,14 @@ export function parseMessyLead(rawText) {
     if (/a2/i.test(lower)) size = "A2 Poster";
     else if (/standee/i.test(lower)) size = "6x2.5ft Rollup Standee";
 
-    const price = qty * 450;
-    estimatedTotal += price;
-    items.push({
+    const priced = repriceItem({
       type: "Posters / Display",
       quantity: qty,
       size,
-      paper: "Laminated High-Res Vinyl / Sunboard",
-      estimatedPrice: price
+      paper: "Laminated High-Res Vinyl / Sunboard"
     });
+    estimatedTotal += priced.estimatedPrice;
+    items.push(priced);
   }
 
   // If no specific item detected, create a generic one
